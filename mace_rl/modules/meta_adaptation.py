@@ -1,5 +1,8 @@
 import torch
 import torch.nn as nn
+from mace_rl.utils.logger import get_logger
+
+logger = get_logger('MetaAdaptation')
 
 class MetaAdaptation(nn.Module):
     """
@@ -19,6 +22,15 @@ class MetaAdaptation(nn.Module):
         """
         Takes exploration outcomes and outputs curiosity weighting parameters.
         """
+        logger.debug(f"Meta-adaptation forward pass - Input shape: {x.shape if hasattr(x, 'shape') else 'N/A'}")
+        try:
+            lstm_out, hidden_state = self.lstm(x, hidden_state)
+            output = self.fc(lstm_out[:, -1, :])  # Use last timestep
+            logger.debug(f"Meta-adaptation output shape: {output.shape}")
+            return output, hidden_state
+        except Exception as e:
+            logger.error(f"Error in meta-adaptation forward pass: {e}")
+            raise
         lstm_out, hidden_state = self.lstm(x, hidden_state)
         output = self.fc(lstm_out)
         return output, hidden_state

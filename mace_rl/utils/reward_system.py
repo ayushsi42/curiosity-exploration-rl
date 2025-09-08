@@ -1,4 +1,7 @@
 from mace_rl.modules.curiosity import CuriosityModule
+from mace_rl.utils.logger import get_logger
+
+logger = get_logger('HybridRewardSystem')
 
 class HybridRewardSystem:
     """
@@ -13,9 +16,23 @@ class HybridRewardSystem:
 
     def get_total_reward(self, state, action, extrinsic_reward):
         """Calculates the total reward."""
-        curiosity_bonus = self.curiosity_module(state, action)
-        total_reward = extrinsic_reward + self.beta * curiosity_bonus
-        return total_reward
+        logger.debug(f"Computing total reward - State shape: {state.shape if hasattr(state, 'shape') else 'N/A'}, "
+                    f"Action: {action}, Extrinsic reward: {extrinsic_reward}")
+        try:
+            # Ensure state is flattened
+            if state.dim() > 1:
+                state = state.view(-1)
+                logger.debug(f"Flattened state to shape: {state.shape}")
+            
+            # Calculate curiosity bonus
+            curiosity_bonus = self.curiosity_module(state, action)
+            total_reward = extrinsic_reward + self.beta * curiosity_bonus
+            logger.debug(f"Reward computation - Curiosity bonus: {curiosity_bonus}, "
+                        f"Beta: {self.beta}, Total reward: {total_reward}")
+            return total_reward
+        except Exception as e:
+            logger.error(f"Error in reward computation: {e}")
+            return extrinsic_reward
 
     def update_beta(self):
         """Updates beta based on a decay schedule."""

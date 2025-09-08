@@ -1,6 +1,10 @@
 import torch
 import torch.nn as nn
+import numpy as np
 from torch.distributions import Categorical, MultivariateNormal
+from mace_rl.utils.logger import get_logger
+
+logger = get_logger('PPO')
 
 class RolloutBuffer:
     def __init__(self):
@@ -31,17 +35,14 @@ class ActorCritic(nn.Module):
         # CNN for image observations
         if isinstance(state_dim, tuple):
             self.cnn = nn.Sequential(
-                nn.Conv2d(state_dim[0], 32, kernel_size=8, stride=4, padding=0),
-                nn.ReLU(),
-                nn.Conv2d(32, 64, kernel_size=4, stride=2, padding=0),
-                nn.ReLU(),
-                nn.Conv2d(64, 64, kernel_size=3, stride=1, padding=0),
+                nn.Conv2d(state_dim[2], 32, kernel_size=2, stride=1, padding=0),
                 nn.ReLU(),
                 nn.Flatten()
             )
             # Calculate the output size of the CNN
             with torch.no_grad():
                 dummy_input = torch.zeros(1, *state_dim)
+                dummy_input = dummy_input.permute(0, 3, 1, 2)
                 cnn_out_dim = self.cnn(dummy_input).shape[1]
             feature_dim = cnn_out_dim
         else:
@@ -161,6 +162,7 @@ class PPO:
 
     @profile
     def update(self):
+        logger.debug("Starting policy update")
         # Monte Carlo estimate of returns
         rewards = []
         discounted_reward = 0
@@ -173,6 +175,8 @@ class PPO:
         # Normalizing the rewards
         rewards = torch.tensor(rewards, dtype=torch.float32)
         rewards = (rewards - rewards.mean()) / (rewards.std() + 1e-7)
+        
+        logger.debug(f"Processed rewards - Mean: {rewards.mean():.4f}, Std: {rewards.std():.4f}")
 
         # convert list to tensor
         old_states = torch.squeeze(torch.stack(self.buffer.states, dim=0)).detach()
@@ -196,18 +200,34 @@ class PPO:
             surr2 = torch.clamp(ratios, 1 - self.eps_clip, 1 + self.eps_clip) * advantages
 
             # final loss of clipped objective PPO
-            loss = -torch.min(surr1, surr2) + 0.5 * self.MseLoss(state_values, rewards) - 0.01 * dist_entropy
+            actor_loss = -torch.min(surr1, surr2).mean()
+            critic_loss = 0.5 * self.MseLoss(state_values, rewards)
+            entropy_loss = -0.01 * dist_entropy.mean()
+            loss = actor_loss + critic_loss + entropy_loss
 
             # take gradient step
             self.optimizer.zero_grad()
-            loss.mean().backward()
+            loss.backward()
             self.optimizer.step()
+
+            logger.debug(f"Policy update stats - Actor Loss: {actor_loss.item():.4f}, "
+                        f"Critic Loss: {critic_loss.item():.4f}, "
+                        f"Entropy Loss: {entropy_loss.item():.4f}")
 
         # Copy new weights into old policy
         self.policy_old.load_state_dict(self.policy.state_dict())
+        logger.debug("Updated policy network weights")
 
         # clear buffer
         self.buffer.clear()
+        logger.debug("Cleared replay buffer")
+
+        return {
+            'actor_loss': actor_loss.item(),
+            'critic_loss': critic_loss.item(),
+            'entropy_loss': entropy_loss.item(),
+            'total_loss': loss.item()
+        }
 
     def save(self, checkpoint_path):
         torch.save(self.policy_old.state_dict(), checkpoint_path)

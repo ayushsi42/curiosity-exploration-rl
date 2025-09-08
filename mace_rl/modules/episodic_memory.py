@@ -2,6 +2,9 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
+from mace_rl.utils.logger import get_logger
+
+logger = get_logger('EpisodicMemory')
 
 class EpisodicMemory(nn.Module):
     """
@@ -12,21 +15,55 @@ class EpisodicMemory(nn.Module):
         self.capacity = capacity
         self.key_dim = key_dim
         self.lru = lru
-
+        
+        logger.info(f"Initializing EpisodicMemory with capacity {capacity} and key_dim {key_dim}")
+        
+        # Initialize storage
         self.keys = torch.zeros(capacity, key_dim)
-        self.values = []
+        self.values = [None] * capacity  # Pre-allocate value slots
         self.usage = torch.zeros(capacity)
         self.pointer = 0
         self.size = 0
 
     def add(self, key, value):
         """Adds a key-value pair to the memory."""
-        if self.size < self.capacity:
-            self.keys[self.pointer] = key
-            self.values.append(value)
-            self.usage[self.pointer] = 1
-            self.pointer = (self.pointer + 1) % self.capacity
-            self.size += 1
+        try:
+            # Ensure key is the correct dimension
+            if key.dim() == 1:
+                if key.shape[0] != self.key_dim:
+                    logger.error(f"Key dimension mismatch. Expected {self.key_dim}, got {key.shape[0]}")
+                    raise ValueError(f"Key dimension mismatch. Expected {self.key_dim}, got {key.shape[0]}")
+            else:
+                key = key.view(-1)  # Flatten if multi-dimensional
+                if key.shape[0] != self.key_dim:
+                    logger.error(f"Flattened key dimension mismatch. Expected {self.key_dim}, got {key.shape[0]}")
+                    raise ValueError(f"Flattened key dimension mismatch. Expected {self.key_dim}, got {key.shape[0]}")
+
+            logger.debug(f"Adding to memory - Key shape: {key.shape}, Value shape: {value.shape if hasattr(value, 'shape') else 'N/A'}")
+
+            if self.size < self.capacity:
+                self.keys[self.pointer] = key
+                self.values[self.pointer] = value
+                self.usage[self.pointer] = 1
+                self.pointer = (self.pointer + 1) % self.capacity
+                self.size += 1
+                logger.debug(f"Added to memory at position {self.pointer-1}, current size: {self.size}")
+            else:
+                logger.debug("Memory at capacity, implementing replacement strategy")
+                if self.lru:
+                    # Find least recently used position
+                    replace_idx = torch.argmin(self.usage).item()
+                else:
+                    # Random replacement
+                    replace_idx = self.pointer
+                    self.pointer = (self.pointer + 1) % self.capacity
+                
+                self.keys[replace_idx] = key
+                self.values[replace_idx] = value
+                self.usage[replace_idx] = 1
+        except Exception as e:
+            logger.error(f"Error adding to memory: {e}")
+            raise
         else:
             if self.lru:
                 # Replace least recently used
@@ -42,27 +79,44 @@ class EpisodicMemory(nn.Module):
                 self.pointer = (self.pointer + 1) % self.capacity
 
 
-    def retrieve(self, query_key, k=1):
-        """
-        Retrieves the top-k most similar values for a given query key
-        using an attention-based mechanism.
-        """
-        if self.size == 0:
+    def query(self, query_key, k=1):
+        """Returns the values associated with the k nearest keys to the query key."""
+        try:
+            # Handle empty memory case
+            if self.size == 0:
+                logger.warning("Memory is empty, returning None")
+                return None, None
+
+            # Ensure query key is the correct dimension
+            if query_key.dim() > 1:
+                query_key = query_key.view(-1)  # Flatten if multi-dimensional
+            
+            if query_key.shape[0] != self.key_dim:
+                logger.error(f"Query key dimension mismatch. Expected {self.key_dim}, got {query_key.shape[0]}")
+                raise ValueError(f"Query key dimension mismatch. Expected {self.key_dim}, got {query_key.shape[0]}")
+
+            logger.debug(f"Querying memory with key shape: {query_key.shape}, k={k}")
+
+            # Compute distances to all keys
+            distances = torch.norm(self.keys[:self.size] - query_key.unsqueeze(0), dim=1)
+            
+            # Get indices of k nearest neighbors
+            _, indices = torch.topk(distances, min(k, self.size), largest=False)
+            
+            # Update usage for retrieved items
+            self.usage[indices] += 1
+
+            logger.debug(f"Retrieved {len(indices)} values from memory")
+            values = [self.values[i] for i in indices]
+            
+            # Additional debug logging for retrieved values
+            logger.debug(f"Retrieved value shapes: {[v.shape if hasattr(v, 'shape') else 'scalar' for v in values]}")
+            
+            return values, indices
+
+        except Exception as e:
+            logger.error(f"Error during memory query: {str(e)}")
             return None, None
-
-        # Attention mechanism
-        similarities = F.cosine_similarity(query_key.unsqueeze(0), self.keys[:self.size], dim=1)
-        scores = F.softmax(similarities, dim=0)
-
-        # Update usage for LRU
-        self.usage[:self.size] += 1
-        self.usage[torch.argmax(scores)] = 1 # Most recently used
-
-        # Retrieve top-k
-        top_scores, top_indices = torch.topk(scores, k)
-        
-        retrieved_values = [self.values[i] for i in top_indices]
-        return retrieved_values, top_scores
 
     def forward(self, query_key, k=1):
         return self.retrieve(query_key, k)
