@@ -16,9 +16,12 @@ class EpisodicMemory(nn.Module):
         self.key_dim = key_dim
         self.lru = lru
         
-        logger.info(f"Initializing EpisodicMemory with capacity {capacity} and key_dim {key_dim}")
+        # Device configuration
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         
-        # Initialize storage
+        logger.info(f"Initializing EpisodicMemory with capacity {capacity} and key_dim {key_dim} on device {self.device}")
+        
+        # Initialize storage - keep keys on CPU for memory efficiency, move to GPU when needed
         self.keys = torch.zeros(capacity, key_dim)
         self.values = [None] * capacity  # Pre-allocate value slots
         self.usage = torch.zeros(capacity)

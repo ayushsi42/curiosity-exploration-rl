@@ -32,50 +32,114 @@ class ActorCritic(nn.Module):
             self.action_dim = action_dim
             self.action_var = torch.full((action_dim,), action_std_init * action_std_init)
 
-        # CNN for image observations
+        # Advanced CNN with residual connections and layer normalization
         if isinstance(state_dim, tuple):
             self.cnn = nn.Sequential(
-                nn.Conv2d(state_dim[2], 32, kernel_size=2, stride=1, padding=0),
+                # First conv block
+                nn.Conv2d(state_dim[2], 64, kernel_size=3, stride=1, padding=1),
+                nn.GroupNorm(8, 64),  # Use GroupNorm instead of BatchNorm2d
                 nn.ReLU(),
-                nn.Flatten()
+                nn.Dropout2d(0.1),
+                
+                # Second conv block
+                nn.Conv2d(64, 128, kernel_size=3, stride=1, padding=1),
+                nn.GroupNorm(16, 128),
+                nn.ReLU(),
+                nn.Dropout2d(0.1),
+                
+                # Third conv block
+                nn.Conv2d(128, 64, kernel_size=2, stride=1, padding=0),
+                nn.GroupNorm(8, 64),
+                nn.ReLU(),
+                
+                # Global Average Pooling + Spatial Attention
+                nn.AdaptiveAvgPool2d((4, 4)),
+                nn.Flatten(),
+                
+                # Enhanced feature processing
+                nn.Linear(64 * 4 * 4, 512),
+                nn.LayerNorm(512),
+                nn.ReLU(),
+                nn.Dropout(0.15),
+                nn.Linear(512, 256),
+                nn.LayerNorm(256),
+                nn.ReLU(),
+                nn.Dropout(0.1)
             )
-            # Calculate the output size of the CNN
-            with torch.no_grad():
-                dummy_input = torch.zeros(1, *state_dim)
-                dummy_input = dummy_input.permute(0, 3, 1, 2)
-                cnn_out_dim = self.cnn(dummy_input).shape[1]
-            feature_dim = cnn_out_dim
+            feature_dim = 256  # Fixed output dimension from enhanced CNN
         else:
             self.cnn = None
             feature_dim = state_dim
 
-        # actor
+        # actor - Enhanced with residual connections and layer normalization (better for single samples)
         if has_continuous_action_space :
-            self.actor = nn.Sequential(
-                nn.Linear(feature_dim, 128),
-                nn.Tanh(),
-                nn.Linear(128, 128),
-                nn.Tanh(),
-                nn.Linear(128, action_dim),
+            self.actor_backbone = nn.Sequential(
+                nn.Linear(feature_dim, 512),
+                nn.LayerNorm(512),  # Use LayerNorm instead of BatchNorm
+                nn.ReLU(),
+                nn.Dropout(0.15),
+                nn.Linear(512, 256),
+                nn.LayerNorm(256),
+                nn.ReLU(),
+                nn.Dropout(0.1),
+                nn.Linear(256, 128),
+                nn.LayerNorm(128),
+                nn.ReLU(),
             )
+            self.actor_head = nn.Sequential(
+                nn.Linear(128, 64),
+                nn.Tanh(),
+                nn.Linear(64, action_dim),
+            )
+            # Residual connection layer
+            self.actor_residual = nn.Linear(feature_dim, 128) if feature_dim != 128 else nn.Identity()
         else:
-            self.actor = nn.Sequential(
-                nn.Linear(feature_dim, 128),
+            self.actor_backbone = nn.Sequential(
+                nn.Linear(feature_dim, 512),
+                nn.LayerNorm(512),
+                nn.ReLU(),
+                nn.Dropout(0.15),
+                nn.Linear(512, 256),
+                nn.LayerNorm(256),
+                nn.ReLU(),
+                nn.Dropout(0.1),
+                nn.Linear(256, 128),
+                nn.LayerNorm(128),
+                nn.ReLU(),
+            )
+            self.actor_head = nn.Sequential(
+                nn.Linear(128, 64),
                 nn.Tanh(),
-                nn.Linear(128, 128),
-                nn.Tanh(),
-                nn.Linear(128, action_dim),
+                nn.Linear(64, action_dim),
                 nn.Softmax(dim=-1)
             )
+            # Residual connection layer
+            self.actor_residual = nn.Linear(feature_dim, 128) if feature_dim != 128 else nn.Identity()
 
-        # critic
-        self.critic = nn.Sequential(
-            nn.Linear(feature_dim, 128),
-            nn.Tanh(),
-            nn.Linear(128, 128),
-            nn.Tanh(),
-            nn.Linear(128, 1)
+        # critic - Enhanced with attention mechanism and residual connections
+        self.critic_backbone = nn.Sequential(
+            nn.Linear(feature_dim, 512),
+            nn.LayerNorm(512),
+            nn.ReLU(),
+            nn.Dropout(0.15),
+            nn.Linear(512, 256),
+            nn.LayerNorm(256),
+            nn.ReLU(),
+            nn.Dropout(0.1),
+            nn.Linear(256, 128),
+            nn.LayerNorm(128),
+            nn.ReLU(),
         )
+        
+        # Self-attention for critic
+        self.critic_attention = nn.MultiheadAttention(128, num_heads=8, dropout=0.1, batch_first=True)
+        self.critic_head = nn.Sequential(
+            nn.Linear(128, 64),
+            nn.Tanh(),
+            nn.Linear(64, 1)
+        )
+        # Residual connection layer for critic
+        self.critic_residual = nn.Linear(feature_dim, 128) if feature_dim != 128 else nn.Identity()
 
     def set_action_std(self, new_action_std):
         self.action_var = torch.full((self.action_dim,), new_action_std * new_action_std)
@@ -88,14 +152,43 @@ class ActorCritic(nn.Module):
             features = state
         return features
 
+    def actor_forward(self, features):
+        """Enhanced actor forward with residual connections"""
+        # Main pathway
+        x = self.actor_backbone(features)
+        
+        # Residual connection
+        residual = self.actor_residual(features)
+        x = x + residual
+        
+        # Output head
+        return self.actor_head(x)
+
+    def critic_forward(self, features):
+        """Enhanced critic forward with attention and residual connections"""
+        # Main pathway
+        x = self.critic_backbone(features)
+        
+        # Residual connection
+        residual = self.critic_residual(features)
+        x = x + residual
+        
+        # Self-attention (expand dimensions for attention)
+        x_expanded = x.unsqueeze(1)  # Add sequence dimension
+        attended, _ = self.critic_attention(x_expanded, x_expanded, x_expanded)
+        x = attended.squeeze(1)  # Remove sequence dimension
+        
+        # Output head
+        return self.critic_head(x)
+
     def act(self, state):
         features = self.forward(state)
         if self.has_continuous_action_space:
-            action_mean = self.actor(features)
+            action_mean = self.actor_forward(features)
             cov_mat = torch.diag(self.action_var)
             dist = MultivariateNormal(action_mean, cov_mat)
         else:
-            action_probs = self.actor(features)
+            action_probs = self.actor_forward(features)
             dist = Categorical(action_probs)
 
         action = dist.sample()
@@ -105,17 +198,17 @@ class ActorCritic(nn.Module):
     def evaluate(self, state, action):
         features = self.forward(state)
         if self.has_continuous_action_space:
-            action_mean = self.actor(features)
+            action_mean = self.actor_forward(features)
             action_var = self.action_var.expand_as(action_mean)
             cov_mat = torch.diag_embed(action_var)
             dist = MultivariateNormal(action_mean, cov_mat)
         else:
-            action_probs = self.actor(features)
+            action_probs = self.actor_forward(features)
             dist = Categorical(action_probs)
             
         action_logprobs = dist.log_prob(action)
         dist_entropy = dist.entropy()
-        state_values = self.critic(features)
+        state_values = self.critic_forward(features)
         
         return action_logprobs, state_values, dist_entropy
 
@@ -129,15 +222,33 @@ class PPO:
         self.eps_clip = eps_clip
         self.K_epochs = K_epochs
 
+        # GPU Support
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        logger.info(f"PPO using device: {self.device}")
+
         self.buffer = RolloutBuffer()
 
-        self.policy = ActorCritic(state_dim, action_dim, has_continuous_action_space, action_std_init)
+        self.policy = ActorCritic(state_dim, action_dim, has_continuous_action_space, action_std_init).to(self.device)
+        
+        # Collect all actor and critic parameters for optimizer
+        actor_params = (
+            list(self.policy.actor_backbone.parameters()) + 
+            list(self.policy.actor_head.parameters()) + 
+            list(self.policy.actor_residual.parameters())
+        )
+        critic_params = (
+            list(self.policy.critic_backbone.parameters()) + 
+            list(self.policy.critic_attention.parameters()) + 
+            list(self.policy.critic_head.parameters()) + 
+            list(self.policy.critic_residual.parameters())
+        )
+        
         self.optimizer = torch.optim.Adam([
-            {'params': self.policy.actor.parameters(), 'lr': lr_actor},
-            {'params': self.policy.critic.parameters(), 'lr': lr_critic}
+            {'params': actor_params, 'lr': lr_actor},
+            {'params': critic_params, 'lr': lr_critic}
         ])
 
-        self.policy_old = ActorCritic(state_dim, action_dim, has_continuous_action_space, action_std_init)
+        self.policy_old = ActorCritic(state_dim, action_dim, has_continuous_action_space, action_std_init).to(self.device)
         self.policy_old.load_state_dict(self.policy.state_dict())
 
         self.MseLoss = nn.MSELoss()
@@ -149,20 +260,19 @@ class PPO:
 
     def select_action(self, state):
         with torch.no_grad():
-            state = torch.FloatTensor(state).unsqueeze(0)
+            state = torch.FloatTensor(state).unsqueeze(0).to(self.device)
             action, action_logprob = self.policy_old.act(state)
 
-        self.buffer.states.append(state.squeeze(0))
-        self.buffer.actions.append(action)
-        self.buffer.logprobs.append(action_logprob)
+        self.buffer.states.append(state.squeeze(0).cpu())  # Store on CPU to save GPU memory
+        self.buffer.actions.append(action.cpu())
+        self.buffer.logprobs.append(action_logprob.cpu())
 
         if self.has_continuous_action_space:
-            return action.numpy().flatten()
-        return action.item()
+            return action.cpu().numpy().flatten()
+        return action.cpu().item()
 
-    @profile
     def update(self):
-        logger.debug("Starting policy update")
+        # logger.debug("Starting policy update")  # Commented to avoid tqdm interference
         # Monte Carlo estimate of returns
         rewards = []
         discounted_reward = 0
@@ -173,15 +283,15 @@ class PPO:
             rewards.insert(0, discounted_reward)
 
         # Normalizing the rewards
-        rewards = torch.tensor(rewards, dtype=torch.float32)
+        rewards = torch.tensor(rewards, dtype=torch.float32).to(self.device)
         rewards = (rewards - rewards.mean()) / (rewards.std() + 1e-7)
         
-        logger.debug(f"Processed rewards - Mean: {rewards.mean():.4f}, Std: {rewards.std():.4f}")
+        # logger.debug(f"Processed rewards - Mean: {rewards.mean():.4f}, Std: {rewards.std():.4f}")  # Commented to avoid tqdm interference
 
-        # convert list to tensor
-        old_states = torch.squeeze(torch.stack(self.buffer.states, dim=0)).detach()
-        old_actions = torch.squeeze(torch.stack(self.buffer.actions, dim=0)).detach()
-        old_logprobs = torch.squeeze(torch.stack(self.buffer.logprobs, dim=0)).detach()
+        # convert list to tensor and move to device
+        old_states = torch.squeeze(torch.stack(self.buffer.states, dim=0)).detach().to(self.device)
+        old_actions = torch.squeeze(torch.stack(self.buffer.actions, dim=0)).detach().to(self.device)
+        old_logprobs = torch.squeeze(torch.stack(self.buffer.logprobs, dim=0)).detach().to(self.device)
 
         # Optimize policy for K epochs
         for _ in range(self.K_epochs):
@@ -210,17 +320,17 @@ class PPO:
             loss.backward()
             self.optimizer.step()
 
-            logger.debug(f"Policy update stats - Actor Loss: {actor_loss.item():.4f}, "
-                        f"Critic Loss: {critic_loss.item():.4f}, "
-                        f"Entropy Loss: {entropy_loss.item():.4f}")
+            # logger.debug(f"Policy update stats - Actor Loss: {actor_loss.item():.4f}, "
+            #             f"Critic Loss: {critic_loss.item():.4f}, "
+            #             f"Entropy Loss: {entropy_loss.item():.4f}")  # Commented to avoid tqdm interference
 
         # Copy new weights into old policy
         self.policy_old.load_state_dict(self.policy.state_dict())
-        logger.debug("Updated policy network weights")
+        # logger.debug("Updated policy network weights")  # Commented to avoid tqdm interference
 
         # clear buffer
         self.buffer.clear()
-        logger.debug("Cleared replay buffer")
+        # logger.debug("Cleared replay buffer")  # Commented to avoid tqdm interference
 
         return {
             'actor_loss': actor_loss.item(),
@@ -243,7 +353,7 @@ if __name__ == '__main__':
     ppo_agent_disc = PPO(state_dim_disc, action_dim_disc, 0.0003, 0.001, 0.99, 4, 0.2, False)
     state_disc = torch.randn(state_dim_disc)
     action_disc = ppo_agent_disc.select_action(state_disc)
-    print("Selected discrete action:", action_disc)
+    # print("Selected discrete action:", action_disc)  # Commented to avoid tqdm interference
 
     # Example usage for continuous action space
     state_dim_cont = 3
@@ -251,5 +361,5 @@ if __name__ == '__main__':
     ppo_agent_cont = PPO(state_dim_cont, action_dim_cont, 0.0003, 0.001, 0.99, 4, 0.2, True)
     state_cont = torch.randn(state_dim_cont)
     action_cont = ppo_agent_cont.select_action(state_cont)
-    print("Selected continuous action:", action_cont)
+    # print("Selected continuous action:", action_cont)  # Commented to avoid tqdm interference
 

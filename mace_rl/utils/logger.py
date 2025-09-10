@@ -13,13 +13,6 @@ def setup_logger(name, log_file=None, level=logging.INFO, console_output=True):
         level (int): Logging level
         console_output (bool): Whether to also output to console
     """
-    # Create logs directory if it doesn't exist
-    if log_file is None:
-        logs_dir = os.path.join(os.getcwd(), 'logs', 'debug_logs')
-        os.makedirs(logs_dir, exist_ok=True)
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        log_file = os.path.join(logs_dir, f'{name}_{timestamp}.log')
-
     # Create logger
     logger = logging.getLogger(name)
     logger.setLevel(level)
@@ -32,14 +25,19 @@ def setup_logger(name, log_file=None, level=logging.INFO, console_output=True):
         '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
     )
 
-    # File handler
-    fh = logging.FileHandler(log_file)
-    fh.setLevel(level)
-    fh.setFormatter(formatter)
-    logger.addHandler(fh)
+    # Only create file handler if explicitly provided log_file (for experiment suite)
+    if log_file is not None:
+        # Create directory for log file if needed
+        os.makedirs(os.path.dirname(log_file), exist_ok=True)
+        
+        # File handler
+        fh = logging.FileHandler(log_file)
+        fh.setLevel(level)
+        fh.setFormatter(formatter)
+        logger.addHandler(fh)
 
-    # Console handler
-    if console_output:
+    # Console handler (only for experiment suite logger)
+    if console_output and log_file is not None:
         ch = logging.StreamHandler()
         ch.setLevel(level)
         ch.setFormatter(formatter)
@@ -65,8 +63,9 @@ def get_state_info(state):
         return get_tensor_info(state)
 
 def get_logger(name, log_file=None):
-    """Get or create a logger for a specific component."""
+    """Get or create a logger for a specific component - DISABLED for performance."""
     logger = logging.getLogger(name)
-    if not logger.handlers:  # Only setup if logger doesn't exist
-        logger = setup_logger(name, log_file)
+    logger.setLevel(logging.CRITICAL + 1)  # Disable all logging
+    logger.handlers = []  # Remove all handlers
+    logger.propagate = False  # Don't propagate to parent loggers
     return logger

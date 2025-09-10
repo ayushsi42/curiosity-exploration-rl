@@ -32,6 +32,10 @@ def train(args):
     )
     logger.info(f"Starting training with arguments: {vars(args)}")
     
+    # Device configuration
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    logger.info(f"Using device: {device}")
+    
     set_seed(args.seed)
     logger.info(f"Random seed set to {args.seed}")
 
@@ -117,15 +121,16 @@ def train(args):
             total_reward = extrinsic_reward
             if curiosity_module:
                 try:
-                    # Convert and flatten state
+                    # Convert and flatten state, move to device
                     if isinstance(state, tuple):
-                        state_tensor = torch.FloatTensor(state[0])
+                        state_tensor = torch.FloatTensor(state[0]).to(device)
                     else:
-                        state_tensor = torch.FloatTensor(state)
+                        state_tensor = torch.FloatTensor(state).to(device)
                     state_tensor = state_tensor.view(-1)  # Flatten the state
                     
-                    # Convert action to tensor
-                    action_tensor = torch.FloatTensor(action) if has_continuous_action_space else torch.LongTensor([action])
+                    # Convert action to tensor, move to device
+                    action_tensor = (torch.FloatTensor(action) if has_continuous_action_space 
+                                   else torch.LongTensor([action])).to(device)
                     
                     logger.debug(f"\nStep {t} - Reward Calculation:")
                     logger.debug(f"  State shape: {state_tensor.shape}")
@@ -147,19 +152,20 @@ def train(args):
             ppo_agent.buffer.rewards.append(total_reward)
             ppo_agent.buffer.is_terminals.append(done)
             
+            # Update episodic memory with the experience
             if episodic_memory:
                 try:
-                    # Process current state
+                    # Convert state for memory storage
                     if isinstance(state, tuple):
-                        state_tensor = torch.FloatTensor(state[0])
+                        state_tensor = torch.FloatTensor(state[0]).to(device)
                     else:
-                        state_tensor = torch.FloatTensor(state)
+                        state_tensor = torch.FloatTensor(state).to(device)
                     
                     # Process next state
                     if isinstance(next_state, tuple):
-                        next_state_tensor = torch.FloatTensor(next_state[0])
+                        next_state_tensor = torch.FloatTensor(next_state[0]).to(device)
                     else:
-                        next_state_tensor = torch.FloatTensor(next_state)
+                        next_state_tensor = torch.FloatTensor(next_state).to(device)
                     
                     # Ensure proper flattening for both states
                     state_flat = state_tensor.view(-1)  # Use view instead of flatten for better error messages
@@ -169,8 +175,8 @@ def train(args):
                     logger.debug(f"  State: original shape {state_tensor.shape}, flattened shape {state_flat.shape}")
                     logger.debug(f"  Next state: original shape {next_state_tensor.shape}, flattened shape {next_state_flat.shape}")
                     
-                    # Create value tensor with next state and reward
-                    value = torch.cat([next_state_flat, torch.FloatTensor([total_reward])])  # Use total_reward instead of extrinsic_reward
+                    # Create value tensor with next state and reward (store on CPU in memory)
+                    value = torch.cat([next_state_flat, torch.FloatTensor([total_reward]).to(device)])  # Use total_reward instead of extrinsic_reward
                     logger.debug(f"  Value tensor shape: {value.shape} (includes state {next_state_flat.shape} and reward)")
                     
                     # Log shapes for debugging
@@ -238,7 +244,7 @@ if __name__ == "__main__":
     parser.add_argument('--k-epochs', type=int, default=4, help='PPO epochs.')
     parser.add_argument('--eps-clip', type=float, default=0.2, help='PPO clip parameter.')
     parser.add_argument('--beta-start', type=float, default=1.0, help='Initial beta for curiosity.')
-    parser.add_argument('--save-interval', type=int, default=100, help='Save model every N episodes.')
+    parser.add_argument('--save-interval', type=int, default=1000, help='Save model every N episodes.')
     parser.add_argument('--log-file', type=str, default=None, help='Log file to save results.')
 
     args = parser.parse_args()

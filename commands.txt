@@ -1,0 +1,2 @@
+python experiment_runner.py --quick-test --run-experiments --no-parallel
+python experiment_runner.py --publication-mode --run-experiments --no-parallel
