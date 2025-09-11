@@ -72,20 +72,25 @@ from mace_rl.envs.atari_env import make_atari_env, wrap_deepmind
 # Global configuration for experiments
 EXPERIMENT_CONFIG = {
     'environments': [
-        # Working basic gym environments (no additional dependencies required)
-        'CartPole-v1',
-        'MountainCar-v0', 
-        'Acrobot-v1',
+        # ✅ ACTIVE ENVIRONMENTS (4 total)
+        # Basic gym environments (no additional dependencies required)
+        'CartPole-v1',                    # Simple control task
+        'Acrobot-v1',                     # More complex control task
+        # MiniGrid environments (require: pip install gym-minigrid or minigrid)  
+        # 'MiniGrid-Empty-8x8-v0',       # Navigation with key-door mechanics
+        # PyBullet environments (require: pip install pybullet)
+        'HalfCheetahBulletEnv-v0',       # Continuous control locomotion
+        
+        # 🚫 DISABLED ENVIRONMENTS
+        # 'MountainCar-v0',               # Removed - replaced with more diverse set
         # Atari environments require: pip install ale_py
         # 'PongNoFrameskip-v4',
-        # MiniGrid environments require: pip install gym-minigrid  
-        # 'MiniGrid-Empty-8x8-v0',
-        # 'MiniGrid-DoorKey-8x8-v0', 
+        # Additional MiniGrid options
+        'MiniGrid-Empty-8x8-v0',
         # 'MiniGrid-FourRooms-v0',
         # 'MiniGrid-MultiRoom-N2-S4-v0',
-        # PyBullet environments require: pip install pybullet
+        # Additional PyBullet options
         # 'AntBulletEnv-v0',
-        # 'HalfCheetahBulletEnv-v0',
         # 'HopperBulletEnv-v0'
     ],
     'algorithms': [
@@ -105,8 +110,17 @@ EXPERIMENT_CONFIG = {
     # Environment-specific episode configurations
     'env_specific_episodes': {
         'CartPole-v1': 2000,
-        'MountainCar-v0': 4000,  # Increased for harder environment
-        'Acrobot-v1': 4000,      # Increased for harder environment
+        'Acrobot-v1': 4000,                           # Increased for harder environment
+        'MiniGrid-Empty-8x8-v0': 3000,             # MiniGrid environments need more episodes
+        'HalfCheetahBulletEnv-v0': 2500,             # Continuous control environment
+    },
+    
+    # Environment-specific timestep configurations
+    'env_specific_timesteps': {
+        'CartPole-v1': 500,                           # CartPole episodes are short
+        'Acrobot-v1': 500,                           # Acrobot episodes are short
+        'MiniGrid-Empty-8x8-v0': 1000,             # MiniGrid can have longer episodes
+        'HalfCheetahBulletEnv-v0': 1000,             # Continuous control longer episodes
     },
     
     # SIMPLIFIED ABLATION STUDY CONFIGURATIONS
@@ -115,7 +129,7 @@ EXPERIMENT_CONFIG = {
         'memory_sizes': [200, 500, 1000],
         
         # Curiosity ablations  
-        'beta_values': [0.1, 0.5, 1.0],
+        'beta_values': [0.75, 1.0, 1.5],
         
         # Simplified beta scheduler ablations (reduced from 8 to 3)
         'beta_schedulers': [
@@ -134,9 +148,21 @@ EXPERIMENT_CONFIG = {
         # Note: save_interval removed - only save final models
     }
 }
+
 # Helper function for defaultdict to avoid pickle issues
 def create_nested_dict():
     return defaultdict(list)
+
+import numpy as np
+
+def convert_numpy(obj):
+    if isinstance(obj, np.integer):
+        return int(obj)
+    elif isinstance(obj, np.floating):
+        return float(obj)
+    elif isinstance(obj, np.ndarray):
+        return obj.tolist()
+    return obj
 
 class ExperimentRunner:
     """Main class for running and analyzing RL experiments."""
@@ -162,6 +188,42 @@ class ExperimentRunner:
         )
         
         self.results = defaultdict(create_nested_dict)
+        
+        # Validate environments on startup
+        self._validate_environments()
+        
+    def _validate_environments(self):
+        """Validate that all configured environments can be loaded."""
+        self.logger.info("Validating configured environments...")
+        failed_envs = []
+        
+        for env_name in EXPERIMENT_CONFIG['environments']:
+            try:
+                if "NoFrameskip" in env_name:
+                    env = make_atari_env(env_name)
+                    env = wrap_deepmind(env, frame_stack=True, clip_rewards=True)
+                elif "MiniGrid" in env_name:
+                    env = make_minigrid_env(env_name)
+                elif "Bullet" in env_name:
+                    env = make_pybullet_env(env_name)
+                else:
+                    env = gym.make(env_name)
+                
+                # Quick test to ensure environment works
+                _ = env.reset()
+                _ = env.action_space.sample()
+                env.close()
+                self.logger.info(f"✅ Environment {env_name} validated successfully")
+                
+            except Exception as e:
+                self.logger.error(f"❌ Environment {env_name} failed validation: {e}")
+                failed_envs.append(env_name)
+        
+        if failed_envs:
+            self.logger.warning(f"Failed environments: {failed_envs}")
+            self.logger.warning("These environments will be skipped during experiments")
+        else:
+            self.logger.info("✅ All environments validated successfully!")
         
     def run_single_experiment(self, env_name, algorithm, seed, episode_limit=None, ablation_config=None):
         """Run a single experiment configuration."""
@@ -219,7 +281,7 @@ class ExperimentRunner:
                 has_continuous_action_space = True
                 is_atari = False
             else:
-                # Basic gym environments (CartPole, MountainCar, etc.)
+                # Basic gym environments (CartPole, Acrobot, etc.)
                 env = gym.make(env_name)
                 has_continuous_action_space = hasattr(env.action_space, 'shape') and len(env.action_space.shape) > 0
                 is_atari = False
@@ -229,8 +291,11 @@ class ExperimentRunner:
                 self.logger.error("Atari environments require ale_py. Install with: pip install ale_py")
             elif "MiniGrid" in env_name:
                 self.logger.error("MiniGrid environments require gym-minigrid. Install with: pip install gym-minigrid")
+                self.logger.error("Alternative: pip install minigrid")
             elif "Bullet" in env_name:
                 self.logger.error("PyBullet environments require pybullet. Install with: pip install pybullet")
+            else:
+                self.logger.error(f"Basic gym environment {env_name} failed to load. Check if gym is properly installed.")
             return {
                 'config': {'env_name': env_name, 'algorithm': algorithm, 'seed': seed, 'exp_id': exp_id},
                 'error': str(e),
@@ -315,7 +380,7 @@ class ExperimentRunner:
             episode_curiosity = 0
             step_count = 0
             
-            for t in range(EXPERIMENT_CONFIG['max_timesteps']):
+            for t in range(EXPERIMENT_CONFIG['env_specific_timesteps'].get(env_name, EXPERIMENT_CONFIG['max_timesteps'])):
                 step_count += 1
                 total_steps += 1  # Track total steps across episodes
                 action = components['agent'].select_action(state)
@@ -520,8 +585,9 @@ class ExperimentRunner:
         
         # Save comprehensive metadata as JSON
         metadata_path = os.path.join(experiment_results_dir, 'metadata.json')
+
         with open(metadata_path, 'w') as f:
-            json.dump(comprehensive_metadata, f, indent=2)
+            json.dump(comprehensive_metadata, f, indent=2, default=convert_numpy)
         
         # Save training data as pickle for detailed analysis
         training_data_path = os.path.join(experiment_results_dir, 'training_data.pkl')
@@ -532,7 +598,7 @@ class ExperimentRunner:
         if eval_metrics:
             eval_path = os.path.join(experiment_results_dir, 'evaluation_results.json')
             with open(eval_path, 'w') as f:
-                json.dump(eval_metrics, f, indent=2)
+                json.dump(eval_metrics, f, indent=2, default=convert_numpy)
         
         # Create experiment summary text file
         summary_path = os.path.join(experiment_results_dir, 'summary.txt')
@@ -768,7 +834,7 @@ class ExperimentRunner:
         
         # Set default hyperparameters or use ablation values
         memory_size = ablation_config.get('memory_size', 1000) if ablation_config else 1000
-        beta_initial = ablation_config.get('beta_initial', 0.1) if ablation_config else 0.1  # Reduced from 1.0 to 0.1
+        beta_initial = ablation_config.get('beta_initial', 0.5) if ablation_config else 0.5  # Increased from 0.1 to 0.5
         lr_actor = ablation_config.get('lr_actor', 0.0003) if ablation_config else 0.0003
         lr_critic = ablation_config.get('lr_critic', 0.001) if ablation_config else 0.001
         hidden_size = ablation_config.get('hidden_size', 128) if ablation_config else 128
@@ -938,15 +1004,10 @@ class ExperimentRunner:
         self.logger.info(f"Starting ablation studies: {ablation_type}")
         
         ablation_tasks = []
-        base_env = 'CartPole-v1'  # Use a simple environment for ablations
+        base_env = 'MiniGrid-Empty-8x8-v0'  # Use MiniGrid-Empty-8x8-v0 for ablations
         base_algorithm = 'mace_rl_full'
         
-        if ablation_type in ['all', 'memory_size']:
-            # Memory size ablation
-            for memory_size in EXPERIMENT_CONFIG['ablation_studies']['memory_sizes']:
-                for seed in EXPERIMENT_CONFIG['seeds']:  # Use all seeds (now just [42])
-                    ablation_config = {'memory_size': memory_size}
-                    ablation_tasks.append((base_env, base_algorithm, seed, None, ablation_config))
+
         
         if ablation_type in ['all', 'beta_values']:
             # Beta value ablation
@@ -986,12 +1047,12 @@ class ExperimentRunner:
         # Save ablation results
         ablation_path = os.path.join(self.experiment_dir, f'ablation_results_{ablation_type}.json')
         with open(ablation_path, 'w') as f:
-            json.dump(dict(ablation_results), f, indent=2, default=str)
+            json.dump(dict(ablation_results), f, indent=2, default=convert_numpy)
         
         self.logger.info(f"Ablation studies completed! Results saved to {ablation_path}")
         return ablation_results
     
-    def run_publication_experiments(self, parallel=True):
+    def run_publication_experiments(self, parallel=True, ablation=False):
         """📚 Run publication-quality experiments with extended settings."""
         self.logger.info("Starting publication-quality experiments")
         
@@ -1007,14 +1068,45 @@ class ExperimentRunner:
         EXPERIMENT_CONFIG['max_episodes'] = pub_config['max_episodes'] 
         EXPERIMENT_CONFIG['max_timesteps'] = pub_config['max_timesteps']
         
+        # Calculate total experiments for comprehensive reporting
+        main_experiments = len(EXPERIMENT_CONFIG['environments']) * len(EXPERIMENT_CONFIG['algorithms']) * len(EXPERIMENT_CONFIG['seeds'])
+        
+        # Calculate ablation experiments
+
+        key_ablations = ['beta_values']
+        ablation_experiments = 0
+        if ablation:
+            for ablation_type in key_ablations:
+                if ablation_type == 'beta_values':
+                    ablation_experiments += len(EXPERIMENT_CONFIG['ablation_studies']['beta_values']) * len(EXPERIMENT_CONFIG['seeds'])
+
+        total_experiments = main_experiments + ablation_experiments
+        
+        # Enhanced publication mode header
+        print(f"\n{'='*80}")
+        print(f"📚 PUBLICATION-QUALITY EXPERIMENT SUITE")
+        print(f"   Main Experiments: {main_experiments}")
+        print(f"   Ablation Studies: {ablation_experiments}")
+        print(f"   Total Experiments: {total_experiments}")
+        print(f"   Environments: {len(EXPERIMENT_CONFIG['environments'])}")
+        print(f"   Algorithms: {len(EXPERIMENT_CONFIG['algorithms'])}")
+        print(f"   Seeds: {len(EXPERIMENT_CONFIG['seeds'])}")
+        print(f"   Episodes per Experiment: {EXPERIMENT_CONFIG['max_episodes']}")
+        print(f"   Max Timesteps: {EXPERIMENT_CONFIG['max_timesteps']}")
+        print(f"   Execution Mode: {'Parallel' if parallel else 'Sequential'}")
+        print(f"{'='*80}\n")
+        
         try:
             # Run main experiments with publication settings
+            print("🚀 Phase 1: Running Main Experiments")
             results = self.run_all_experiments(parallel=parallel)
             
             # Run key ablations with publication settings
-            key_ablations = ['memory_size', 'beta_values']
-            for ablation in key_ablations:
-                self.run_ablation_studies(ablation_type=ablation, parallel=parallel)
+            if ablation:
+                print("\n🔬 Phase 2: Running Ablation Studies")
+                for ablation in key_ablations:
+                    print(f"   Running {ablation} ablation...")
+                    self.run_ablation_studies(ablation_type=ablation, parallel=parallel)
             
             self.logger.info("Publication experiments completed!")
             
@@ -1217,7 +1309,7 @@ class ExperimentRunner:
         # Save comprehensive summary
         summary_path = os.path.join(self.experiment_dir, 'comprehensive_experiment_summary.json')
         with open(summary_path, 'w') as f:
-            json.dump(summary_data, f, indent=2, default=str)
+            json.dump(summary_data, f, indent=2, default=convert_numpy)
         
         self.logger.info(f"Comprehensive experiment summary saved to: {summary_path}")
         
@@ -1297,7 +1389,7 @@ class ExperimentRunner:
         # Save detailed analysis
         analysis_path = os.path.join(self.experiment_dir, 'detailed_analysis.json')
         with open(analysis_path, 'w') as f:
-            json.dump(analysis_data, f, indent=2, default=str)
+            json.dump(analysis_data, f, indent=2, default=convert_numpy)
         
         self.logger.info(f"Detailed analysis saved to: {analysis_path}")
     
@@ -1361,7 +1453,7 @@ class ExperimentRunner:
         # Save statistical results
         stats_path = os.path.join(self.experiment_dir, 'statistical_analysis.json')
         with open(stats_path, 'w') as f:
-            json.dump(stats_results, f, indent=2)
+            json.dump(stats_results, f, indent=2, default=convert_numpy)
         
         return stats_results
     
@@ -1562,7 +1654,7 @@ class ExperimentRunner:
             
             json_path = os.path.join(self.experiment_dir, 'experiment_results.json')
             with open(json_path, 'w') as f:
-                json.dump(summary_data, f, indent=2)
+                json.dump(summary_data, f, indent=2, default=convert_numpy)
             
             self.logger.info(f"Results exported to JSON: {json_path}")
             return json_path
@@ -1708,6 +1800,11 @@ if __name__ == "__main__":
             print(f"   Evaluation: {result['eval_reward']}")
         print("=" * 70)
         print(f"✅ Quick test completed: {len(results)}/{total_experiments} experiments successful")
+    
+    elif args.publication_mode:
+        print("📊 Running Publication Mode")
+        use_parallel = not args.no_parallel
+        runner.run_publication_experiments(parallel=use_parallel,ablation=args.run_ablation)
             
     elif args.run_experiments:
         print("🏃 Running All Experiments")
@@ -1715,14 +1812,9 @@ if __name__ == "__main__":
         runner.run_all_experiments(parallel=use_parallel)
         
     elif args.run_ablation:
-        print("🔬 Running Ablation Studies")
+        print("� Running Ablation Studies")
         use_parallel = not args.no_parallel
         runner.run_ablation_studies(parallel=use_parallel)
-        
-    elif args.publication_mode:
-        print("📊 Running Publication Mode")
-        use_parallel = not args.no_parallel
-        runner.run_publication_experiments(parallel=use_parallel)
         
     else:
         print("ℹ️  No experiment type specified. Use --help for options.")
