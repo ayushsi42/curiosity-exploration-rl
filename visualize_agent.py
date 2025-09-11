@@ -25,7 +25,6 @@ from mace_rl.modules.episodic_memory import EpisodicMemory
 from mace_rl.modules.curiosity import CuriosityModule
 from mace_rl.modules.meta_adaptation import MetaAdaptation
 from mace_rl.utils.reward_system import HybridRewardSystem
-from mace_rl.envs.atari_env import make_atari_env, wrap_deepmind
 from mace_rl.envs.minigrid_env import make_minigrid_env
 from mace_rl.envs.pybullet_env import make_pybullet_env
 
@@ -49,29 +48,19 @@ class AgentVisualizer:
         print(f"🎮 Loading environment: {self.env_name}")
         
         try:
-            if 'ALE' in self.env_name or 'Atari' in self.env_name:
-                self.env = make_atari_env(self.env_name)
-                self.env = wrap_deepmind(self.env, frame_stack=True)
-                self.is_atari = True
-            elif 'MiniGrid' in self.env_name:
+            if 'MiniGrid' in self.env_name:
                 self.env = make_minigrid_env(self.env_name)
-                self.is_atari = False
             elif any(bullet_env in self.env_name for bullet_env in ['Ant', 'Humanoid', 'Walker']):
                 self.env = make_pybullet_env(self.env_name)
-                self.is_atari = False
             else:
                 self.env = gym.make(self.env_name, render_mode='human')
-                self.is_atari = False
-                
             print(f"✅ Environment loaded successfully")
             print(f"   Observation space: {self.env.observation_space}")
             print(f"   Action space: {self.env.action_space}")
-            
         except Exception as e:
             print(f"❌ Failed to load environment: {e}")
             # Fallback to basic gym environment
             self.env = gym.make(self.env_name, render_mode='human')
-            self.is_atari = False
     
     def _load_model(self):
         """Load the trained model and components."""

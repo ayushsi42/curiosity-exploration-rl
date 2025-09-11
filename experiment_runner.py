@@ -67,7 +67,6 @@ from mace_rl.utils.reward_system import HybridRewardSystem
 from mace_rl.utils.beta_schedulers import create_beta_scheduler
 from mace_rl.envs.minigrid_env import make_minigrid_env
 from mace_rl.envs.pybullet_env import make_pybullet_env
-from mace_rl.envs.atari_env import make_atari_env, wrap_deepmind
 
 # Global configuration for experiments
 EXPERIMENT_CONFIG = {
@@ -834,7 +833,7 @@ class ExperimentRunner:
         
         # Set default hyperparameters or use ablation values
         memory_size = ablation_config.get('memory_size', 1000) if ablation_config else 1000
-        beta_initial = ablation_config.get('beta_initial', 0.5) if ablation_config else 0.5  # Increased from 0.1 to 0.5
+        beta_initial = ablation_config.get('beta_initial', 0.2) if ablation_config else 0.2  # Default changed from 0.5 to 0.2
         lr_actor = ablation_config.get('lr_actor', 0.0003) if ablation_config else 0.0003
         lr_critic = ablation_config.get('lr_critic', 0.001) if ablation_config else 0.001
         hidden_size = ablation_config.get('hidden_size', 128) if ablation_config else 128

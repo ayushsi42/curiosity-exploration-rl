@@ -10,7 +10,6 @@ from mace_rl.modules.meta_adaptation import MetaAdaptation
 from mace_rl.utils.reward_system import HybridRewardSystem
 from mace_rl.envs.minigrid_env import make_minigrid_env
 from mace_rl.envs.pybullet_env import make_pybullet_env
-from mace_rl.envs.atari_env import make_atari_env, wrap_deepmind
 
 def train(args):
     """Main training loop for ablation studies."""
@@ -18,10 +17,7 @@ def train(args):
 
     # Initialize environment
     if "NoFrameskip" in args.env_name:
-        env = make_atari_env(args.env_name)
-        env = wrap_deepmind(env, frame_stack=True, clip_rewards=True)
         has_continuous_action_space = False
-        is_atari = True
     elif "MiniGrid" in args.env_name:
         env = make_minigrid_env(args.env_name)
         has_continuous_action_space = False
@@ -40,16 +36,16 @@ def train(args):
 
     # Initialize components based on ablation flags
     episodic_memory = None
-    if not args.no_episodic_memory and not is_atari:
+        if not args.no_episodic_memory:
         episodic_memory = EpisodicMemory(args.memory_capacity, state_dim[0])
 
     curiosity_module = None
-    if not args.no_curiosity and not is_atari:
+        if not args.no_curiosity:
         curiosity_module = CuriosityModule(state_dim[0], action_dim, episodic_memory, continuous=has_continuous_action_space)
 
     meta_adaptation = None
-    if not args.no_meta_adaptation:
-        meta_adaptation = MetaAdaptation(state_dim[0] if not is_atari else 256, 128, 1)
+        if not args.no_meta_adaptation:
+            meta_adaptation = MetaAdaptation(state_dim[0], 128, 1)
 
     reward_system = HybridRewardSystem(curiosity_module, beta_initial=args.beta_start)
     

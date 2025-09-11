@@ -6,7 +6,6 @@ from mace_rl.utils.utils import set_seed, log_data
 from mace_rl.agents.a2c import A2C
 from mace_rl.envs.minigrid_env import make_minigrid_env
 from mace_rl.envs.pybullet_env import make_pybullet_env
-from mace_rl.envs.atari_env import make_atari_env, wrap_deepmind
 
 def train(args):
     """Main training loop for A2C baseline."""
@@ -14,7 +13,8 @@ def train(args):
 
     # Initialize environment
     if "NoFrameskip" in args.env_name:
-        env = make_atari_env(args.env_name)
+    # Atari environment removed
+    raise NotImplementedError('Atari environments are removed from this codebase.')
         env = wrap_deepmind(env, frame_stack=True, clip_rewards=True)
         has_continuous_action_space = False
     elif "MiniGrid" in args.env_name:

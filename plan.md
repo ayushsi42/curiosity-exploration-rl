@@ -77,7 +77,6 @@ Current RL methods struggle with the feedback loop challenge and require massive
 Test on progressively complex environments:
 1. **MiniGrid** (discrete, sparse rewards) - 2GB memory usage
 2. **PyBullet** locomotion tasks (continuous control) - 4GB memory usage  
-3. **Atari** with modified sparse rewards - 6GB memory usage
 4. **Custom procedural environments** - 8GB memory usage
 
 **Step 4.2: Baseline Comparisons**
