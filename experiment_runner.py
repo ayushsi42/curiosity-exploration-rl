@@ -75,22 +75,22 @@ EXPERIMENT_CONFIG = {
         # Basic gym environments (no additional dependencies required)
         'CartPole-v1',                    # Simple control task
         'Acrobot-v1',                     # More complex control task
-        # MiniGrid environments (require: pip install gym-minigrid or minigrid)  
-        # 'MiniGrid-Empty-8x8-v0',       # Navigation with key-door mechanics
-        # PyBullet environments (require: pip install pybullet)
+        # # MiniGrid environments (require: pip install gym-minigrid or minigrid)  
+        # # 'HopperBulletEnv-v0',       # Navigation with key-door mechanics
+        # # PyBullet environments (require: pip install pybullet)
         'HalfCheetahBulletEnv-v0',       # Continuous control locomotion
         
-        # 🚫 DISABLED ENVIRONMENTS
-        # 'MountainCar-v0',               # Removed - replaced with more diverse set
-        # Atari environments require: pip install ale_py
-        # 'PongNoFrameskip-v4',
-        # Additional MiniGrid options
-        'MiniGrid-Empty-8x8-v0',
+        # # 🚫 DISABLED ENVIRONMENTS
+        # # 'MountainCar-v0',               # Removed - replaced with more diverse set
+        # # Atari environments require: pip install ale_py
+        # # 'PongNoFrameskip-v4',
+        # # Additional MiniGrid options
+        # # 'HopperBulletEnv-v0',
         # 'MiniGrid-FourRooms-v0',
         # 'MiniGrid-MultiRoom-N2-S4-v0',
         # Additional PyBullet options
         # 'AntBulletEnv-v0',
-        # 'HopperBulletEnv-v0'
+        'HopperBulletEnv-v0'
     ],
     'algorithms': [
         'ppo_baseline',
@@ -101,7 +101,7 @@ EXPERIMENT_CONFIG = {
         'mace_rl_curiosity_only',
         'mace_rl_memory_only'
     ],
-    'seeds': [42],  # Single seed for all experiments
+    'seeds': [42,56,96],  # Single seed for all experiments
     'max_episodes': 2000,
     'max_timesteps': 10000,
     # Note: save_interval removed - only save final models
@@ -110,7 +110,7 @@ EXPERIMENT_CONFIG = {
     'env_specific_episodes': {
         'CartPole-v1': 2000,
         'Acrobot-v1': 4000,                           # Increased for harder environment
-        'MiniGrid-Empty-8x8-v0': 3000,             # MiniGrid environments need more episodes
+        'HopperBulletEnv-v0': 3000,             # MiniGrid environments need more episodes
         'HalfCheetahBulletEnv-v0': 2500,             # Continuous control environment
     },
     
@@ -118,7 +118,7 @@ EXPERIMENT_CONFIG = {
     'env_specific_timesteps': {
         'CartPole-v1': 500,                           # CartPole episodes are short
         'Acrobot-v1': 500,                           # Acrobot episodes are short
-        'MiniGrid-Empty-8x8-v0': 1000,             # MiniGrid can have longer episodes
+        'HopperBulletEnv-v0': 1000,             # MiniGrid can have longer episodes
         'HalfCheetahBulletEnv-v0': 1000,             # Continuous control longer episodes
     },
     
@@ -140,7 +140,7 @@ EXPERIMENT_CONFIG = {
     
     # 🎯 PUBLICATION MODE SETTINGS
     'publication_mode': {
-        'seeds': [42],  # Single seed for publication experiments too
+        'seeds': [42,56,78],  # Single seed for publication experiments too
         'max_episodes': 2000,
         'max_timesteps': 20000,
         'validation_episodes': 100
@@ -833,7 +833,7 @@ class ExperimentRunner:
         
         # Set default hyperparameters or use ablation values
         memory_size = ablation_config.get('memory_size', 1000) if ablation_config else 1000
-        beta_initial = ablation_config.get('beta_initial', 0.2) if ablation_config else 0.2  # Default changed from 0.5 to 0.2
+        beta_initial = ablation_config.get('beta_initial', 0.4) if ablation_config else 0.4  # Default changed from 0.5 to 0.2
         lr_actor = ablation_config.get('lr_actor', 0.0003) if ablation_config else 0.0003
         lr_critic = ablation_config.get('lr_critic', 0.001) if ablation_config else 0.001
         hidden_size = ablation_config.get('hidden_size', 128) if ablation_config else 128
@@ -1003,7 +1003,7 @@ class ExperimentRunner:
         self.logger.info(f"Starting ablation studies: {ablation_type}")
         
         ablation_tasks = []
-        base_env = 'MiniGrid-Empty-8x8-v0'  # Use MiniGrid-Empty-8x8-v0 for ablations
+        base_env = 'HopperBulletEnv-v0'  # Use HopperBulletEnv-v0 for ablations
         base_algorithm = 'mace_rl_full'
         
 
