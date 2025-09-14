@@ -98,28 +98,27 @@ EXPERIMENT_CONFIG = {
         'mace_rl_no_memory',
         'mace_rl_no_curiosity',
         'mace_rl_no_meta',
-        'mace_rl_curiosity_only',
-        'mace_rl_memory_only'
+        # 'mace_rl_curiosity_only',
+        # 'mace_rl_memory_only'
     ],
-    'seeds': [42,56,96],  # Single seed for all experiments
+    'seeds': [42,678],  # Single seed for all experiments
     'max_episodes': 2000,
     'max_timesteps': 10000,
     # Note: save_interval removed - only save final models
     
     # Environment-specific episode configurations
     'env_specific_episodes': {
-        'CartPole-v1': 2000,
-        'Acrobot-v1': 4000,                           # Increased for harder environment
-        'HopperBulletEnv-v0': 3000,             # MiniGrid environments need more episodes
-        'HalfCheetahBulletEnv-v0': 2500,             # Continuous control environment
+    'CartPole-v1': 1000,
+    'Acrobot-v1': 2000,
+    'HopperBulletEnv-v0': 3000,
+    'HalfCheetahBulletEnv-v0': 8000,
     },
-    
-    # Environment-specific timestep configurations
+
     'env_specific_timesteps': {
-        'CartPole-v1': 500,                           # CartPole episodes are short
-        'Acrobot-v1': 500,                           # Acrobot episodes are short
-        'HopperBulletEnv-v0': 1000,             # MiniGrid can have longer episodes
-        'HalfCheetahBulletEnv-v0': 1000,             # Continuous control longer episodes
+    'CartPole-v1': 500,
+    'Acrobot-v1': 500,
+    'HopperBulletEnv-v0': 1000,
+    'HalfCheetahBulletEnv-v0': 1000,
     },
     
     # SIMPLIFIED ABLATION STUDY CONFIGURATIONS
@@ -833,18 +832,42 @@ class ExperimentRunner:
         
         # Set default hyperparameters or use ablation values
         memory_size = ablation_config.get('memory_size', 1000) if ablation_config else 1000
-        beta_initial = ablation_config.get('beta_initial', 0.4) if ablation_config else 0.4  # Default changed from 0.5 to 0.2
+        # Robust beta extraction: check for all possible keys
+        beta_keys = ['beta_initial', 'beta', 'beta_value']
+        beta_val = None
+        if ablation_config:
+            for k in beta_keys:
+                if k in ablation_config:
+                    beta_val = ablation_config[k]
+                    break
+        if beta_val is None:
+            beta_val = 0.4  # Default
+        # For legacy code, keep beta_initial for most schedulers
+        beta_initial = beta_val
         lr_actor = ablation_config.get('lr_actor', 0.0003) if ablation_config else 0.0003
         lr_critic = ablation_config.get('lr_critic', 0.001) if ablation_config else 0.001
         hidden_size = ablation_config.get('hidden_size', 128) if ablation_config else 128
         gamma = ablation_config.get('gamma', 0.99) if ablation_config else 0.99
         curiosity_lr_mult = ablation_config.get('curiosity_lr_mult', 1.0) if ablation_config else 1.0
-        
+
         # Simplified beta scheduler configuration
         beta_scheduler_config = None
         if ablation_config and 'beta_scheduler' in ablation_config:
             # Only support direct scheduler type specification
-            beta_scheduler_config = ablation_config['beta_scheduler']
+            # If scheduler is a string, pass as is
+            if isinstance(ablation_config['beta_scheduler'], str):
+                beta_scheduler_config = ablation_config['beta_scheduler']
+            # If dict, patch in correct beta key
+            elif isinstance(ablation_config['beta_scheduler'], dict):
+                beta_scheduler_config = ablation_config['beta_scheduler'].copy()
+                # Patch beta value for constant scheduler
+                if beta_scheduler_config.get('scheduler_type', '') == 'constant':
+                    beta_scheduler_config['beta_value'] = beta_val
+                else:
+                    beta_scheduler_config['beta_initial'] = beta_val
+            else:
+                beta_scheduler_config = ablation_config['beta_scheduler']
+        # If not using a scheduler, pass beta_initial as before
         
         # Initialize PPO agent (common to all algorithms)
         components['agent'] = PPO(
@@ -874,11 +897,16 @@ class ExperimentRunner:
                 )
                 
                 # Initialize reward system with beta scheduler
-                components['reward_system'] = HybridRewardSystem(
-                    components['curiosity_module'], 
-                    beta_scheduler=beta_scheduler_config,
-                    beta_initial=beta_initial  # Fallback for legacy mode
-                )
+                if beta_scheduler_config is not None:
+                    components['reward_system'] = HybridRewardSystem(
+                        components['curiosity_module'], 
+                        beta_scheduler=beta_scheduler_config
+                    )
+                else:
+                    components['reward_system'] = HybridRewardSystem(
+                        components['curiosity_module'],
+                        beta_initial=beta_initial
+                    )
         
         elif algorithm == 'mace_rl_no_memory':
             # MACE-RL without episodic memory
@@ -890,11 +918,16 @@ class ExperimentRunner:
                 )
                 
                 # Initialize reward system with beta scheduler
-                components['reward_system'] = HybridRewardSystem(
-                    components['curiosity_module'], 
-                    beta_scheduler=beta_scheduler_config,
-                    beta_initial=beta_initial  # Fallback for legacy mode
-                )
+                if beta_scheduler_config is not None:
+                    components['reward_system'] = HybridRewardSystem(
+                        components['curiosity_module'], 
+                        beta_scheduler=beta_scheduler_config
+                    )
+                else:
+                    components['reward_system'] = HybridRewardSystem(
+                        components['curiosity_module'],
+                        beta_initial=beta_initial
+                    )
         
         elif algorithm == 'mace_rl_no_curiosity':
             # MACE-RL without curiosity module
@@ -903,11 +936,16 @@ class ExperimentRunner:
                 components['episodic_memory'] = EpisodicMemory(memory_size, state_size)
                 
                 # Initialize reward system with no curiosity module
-                components['reward_system'] = HybridRewardSystem(
-                    curiosity_module=None,  # No curiosity bonus
-                    beta_scheduler=beta_scheduler_config,
-                    beta_initial=0.0  # No curiosity bonus
-                )
+                if beta_scheduler_config is not None:
+                    components['reward_system'] = HybridRewardSystem(
+                        curiosity_module=None,
+                        beta_scheduler=beta_scheduler_config
+                    )
+                else:
+                    components['reward_system'] = HybridRewardSystem(
+                        curiosity_module=None,
+                        beta_initial=0.0
+                    )
         
         elif algorithm == 'mace_rl_no_meta':
             # MACE-RL without meta-adaptation
@@ -920,11 +958,16 @@ class ExperimentRunner:
                 )
                 
                 # Initialize reward system with beta scheduler
-                components['reward_system'] = HybridRewardSystem(
-                    components['curiosity_module'], 
-                    beta_scheduler=beta_scheduler_config,
-                    beta_initial=beta_initial  # Fallback for legacy mode
-                )
+                if beta_scheduler_config is not None:
+                    components['reward_system'] = HybridRewardSystem(
+                        components['curiosity_module'], 
+                        beta_scheduler=beta_scheduler_config
+                    )
+                else:
+                    components['reward_system'] = HybridRewardSystem(
+                        components['curiosity_module'],
+                        beta_initial=beta_initial
+                    )
         
         elif algorithm == 'mace_rl_curiosity_only':
             # MACE-RL with only curiosity (no memory, no meta-adaptation)
@@ -936,11 +979,16 @@ class ExperimentRunner:
                 )
                 
                 # Initialize reward system with beta scheduler
-                components['reward_system'] = HybridRewardSystem(
-                    components['curiosity_module'], 
-                    beta_scheduler=beta_scheduler_config,
-                    beta_initial=beta_initial  # Fallback for legacy mode
-                )
+                if beta_scheduler_config is not None:
+                    components['reward_system'] = HybridRewardSystem(
+                        components['curiosity_module'], 
+                        beta_scheduler=beta_scheduler_config
+                    )
+                else:
+                    components['reward_system'] = HybridRewardSystem(
+                        components['curiosity_module'],
+                        beta_initial=beta_initial
+                    )
         
         elif algorithm == 'mace_rl_memory_only':
             # MACE-RL with only episodic memory (no curiosity, no meta-adaptation)
@@ -949,11 +997,16 @@ class ExperimentRunner:
                 components['episodic_memory'] = EpisodicMemory(memory_size, state_size)
                 
                 # Initialize reward system with no curiosity module for consistency
-                components['reward_system'] = HybridRewardSystem(
-                    curiosity_module=None,  # No curiosity bonus
-                    beta_scheduler=beta_scheduler_config,
-                    beta_initial=0.0  # No curiosity bonus
-                )
+                if beta_scheduler_config is not None:
+                    components['reward_system'] = HybridRewardSystem(
+                        curiosity_module=None,
+                        beta_scheduler=beta_scheduler_config
+                    )
+                else:
+                    components['reward_system'] = HybridRewardSystem(
+                        curiosity_module=None,
+                        beta_initial=0.0
+                    )
         
         return components
     
