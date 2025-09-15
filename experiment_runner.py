@@ -123,7 +123,7 @@ EXPERIMENT_CONFIG = {
     
     # SIMPLIFIED ABLATION STUDY CONFIGURATIONS
     # --- Meta network usage flag ---
-    'use_meta_network_for_beta': False,  # If True, use meta network for beta; else use scheduler
+    'use_meta_network_for_beta': True,  # If True, use meta network for beta; else use scheduler
     'ablation_studies': {
         # Memory ablations
         'memory_sizes': [200, 500, 1000],
