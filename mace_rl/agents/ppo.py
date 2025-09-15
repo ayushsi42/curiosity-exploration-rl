@@ -142,7 +142,9 @@ class ActorCritic(nn.Module):
         self.critic_residual = nn.Linear(feature_dim, 128) if feature_dim != 128 else nn.Identity()
 
     def set_action_std(self, new_action_std):
-        self.action_var = torch.full((self.action_dim,), new_action_std * new_action_std)
+        # Ensure action_var is always on the same device as the model
+        device = next(self.parameters()).device
+        self.action_var = torch.full((self.action_dim,), new_action_std * new_action_std, device=device)
 
     def forward(self, state):
         if self.cnn:
@@ -185,7 +187,9 @@ class ActorCritic(nn.Module):
         features = self.forward(state)
         if self.has_continuous_action_space:
             action_mean = self.actor_forward(features)
-            cov_mat = torch.diag(self.action_var)
+            # Ensure action_var is on the same device as action_mean
+            action_var = self.action_var.to(action_mean.device)
+            cov_mat = torch.diag(action_var)
             dist = MultivariateNormal(action_mean, cov_mat)
         else:
             action_probs = self.actor_forward(features)
