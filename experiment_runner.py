@@ -73,12 +73,12 @@ EXPERIMENT_CONFIG = {
     'environments': [
         # ✅ ACTIVE ENVIRONMENTS (4 total)
         # Basic gym environments (no additional dependencies required)
-        # 'CartPole-v1',                    # Simple control task
-        # 'Acrobot-v1',                     # More complex control task
+        'CartPole-v1',                    # Simple control task
+        'Acrobot-v1',                     # More complex control task
         # # MiniGrid environments (require: pip install gym-minigrid or minigrid)  
         # # 'HopperBulletEnv-v0',       # Navigation with key-door mechanics
         # # PyBullet environments (require: pip install pybullet)
-        'HalfCheetahBulletEnv-v0',       # Continuous control locomotion
+        # 'HalfCheetahBulletEnv-v0',       # Continuous control locomotion
         
         # # 🚫 DISABLED ENVIRONMENTS
         # # 'MountainCar-v0',               # Removed - replaced with more diverse set
@@ -93,8 +93,8 @@ EXPERIMENT_CONFIG = {
         'HopperBulletEnv-v0'
     ],
     'algorithms': [
-        # 'ppo_baseline',
-        'mace_rl_full',
+        'ppo_baseline',
+        # 'mace_rl_full',
         # 'mace_rl_no_memory',
         # 'mace_rl_no_curiosity',
         # 'mace_rl_no_meta',
@@ -102,15 +102,15 @@ EXPERIMENT_CONFIG = {
         # 'mace_rl_memory_only'
     ],
     'seeds': [42],  # Single seed for all experiments
-    'max_episodes': 2000,
+    'max_episodes': 6000,
     'max_timesteps': 10000,
     # Note: save_interval removed - only save final models
     
     # Environment-specific episode configurations
     'env_specific_episodes': {
-    'CartPole-v1': 1000,
+    'CartPole-v1': 2000,
     'Acrobot-v1': 2000,
-    'HopperBulletEnv-v0': 3000,
+    'HopperBulletEnv-v0': 6000,
     'HalfCheetahBulletEnv-v0': 8000,
     },
 
@@ -248,9 +248,12 @@ class ExperimentRunner:
                 else:
                     # Simple key-value pairs
                     config_parts.append(f"{key}{value}")
-            
             if config_parts:
                 exp_id_parts.append("_".join(config_parts))
+
+        # Add beta indicator to exp_id if present in ablation_config
+        if ablation_config and 'beta_initial' in ablation_config:
+            exp_id_parts.append(f"beta{ablation_config['beta_initial']}")
         
         exp_id = "_".join(exp_id_parts)
         
@@ -1061,14 +1064,17 @@ class ExperimentRunner:
         
         return components
     
-    def run_all_experiments(self, parallel=True):
-        """Run all experiment configurations."""
+    def run_all_experiments(self, parallel=True, beta_override=None):
+        """Run all experiment configurations. Optionally override beta for all runs."""
         experiment_tasks = []
         for env_name in EXPERIMENT_CONFIG['environments']:
             for algorithm in EXPERIMENT_CONFIG['algorithms']:
                 for seed in EXPERIMENT_CONFIG['seeds']:
-                    experiment_tasks.append((env_name, algorithm, seed))
-        
+                    ablation_config = None
+                    if beta_override is not None:
+                        ablation_config = {'beta_initial': beta_override}
+                    experiment_tasks.append((env_name, algorithm, seed, None, ablation_config))
+
         # Clean suite header
         print(f"\n{'='*80}")
         print(f"🧪 MACE-RL COMPREHENSIVE EXPERIMENT SUITE")
@@ -1076,9 +1082,12 @@ class ExperimentRunner:
         print(f"   Environments: {len(EXPERIMENT_CONFIG['environments'])}")
         print(f"   Algorithms: {len(EXPERIMENT_CONFIG['algorithms'])}")
         print(f"   Seeds: {len(EXPERIMENT_CONFIG['seeds'])}")
+        if beta_override is not None:
+            print(f"   Beta override: {beta_override}")
         print(f"   Execution Mode: {'Parallel' if parallel and len(experiment_tasks) > 1 else 'Sequential'}")
         print(f"{'='*80}\n")
-        
+
+        results = []
         if parallel and len(experiment_tasks) > 1:
             # Run experiments in parallel
             print(f"🚀 Running experiments in parallel using {min(cpu_count(), 4)} processes\n")
@@ -1087,20 +1096,19 @@ class ExperimentRunner:
         else:
             # Run experiments sequentially
             print("🔄 Running experiments sequentially\n")
-            results = []
-            for i, (env_name, algorithm, seed) in enumerate(experiment_tasks, 1):
+            for i, task in enumerate(experiment_tasks, 1):
                 print(f"📊 Experiment {i}/{len(experiment_tasks)}")
-                result = self.run_single_experiment(env_name, algorithm, seed)
+                result = self.run_single_experiment(*task)
                 results.append(result)
-        
+
         # Organize results
         for result in results:
             env_name = result['config']['env_name']
             algorithm = result['config']['algorithm']
             self.results[env_name][algorithm].append(result)
-        
+
         self.logger.info("All experiments completed!")
-        return self.results
+        return results
     
     def run_ablation_studies(self, ablation_type='all', parallel=True):
         """Run simplified ablation studies."""
@@ -1156,26 +1164,35 @@ class ExperimentRunner:
         return ablation_results
     
     def run_publication_experiments(self, parallel=True, ablation=False):
-        """📚 Run publication-quality experiments with extended settings."""
+        """📚 Run publication-quality experiments with extended settings and beta sweep."""
         self.logger.info("Starting publication-quality experiments")
-        
+
         # Use publication settings
         pub_config = EXPERIMENT_CONFIG['publication_mode']
-        
+
         # Override global config temporarily
         original_seeds = EXPERIMENT_CONFIG['seeds']
         original_episodes = EXPERIMENT_CONFIG['max_episodes']
         original_timesteps = EXPERIMENT_CONFIG['max_timesteps']
-        
-        EXPERIMENT_CONFIG['seeds'] = pub_config['seeds']
-        EXPERIMENT_CONFIG['max_episodes'] = pub_config['max_episodes'] 
-        EXPERIMENT_CONFIG['max_timesteps'] = pub_config['max_timesteps']
-        
-        # Calculate total experiments for comprehensive reporting
-        main_experiments = len(EXPERIMENT_CONFIG['environments']) * len(EXPERIMENT_CONFIG['algorithms']) * len(EXPERIMENT_CONFIG['seeds'])
-        
-        # Calculate ablation experiments
 
+        EXPERIMENT_CONFIG['seeds'] = pub_config['seeds']
+        EXPERIMENT_CONFIG['max_episodes'] = pub_config['max_episodes']
+        EXPERIMENT_CONFIG['max_timesteps'] = pub_config['max_timesteps']
+
+        # Beta values for publication mode sweep
+        beta_sweep = [0.2, 0.4, 0.8]  # You can adjust or make configurable
+        beta_algorithms = [alg for alg in EXPERIMENT_CONFIG['algorithms'] if 'mace' in alg or 'curiosity' in alg or 'memory' in alg]
+        non_beta_algorithms = [alg for alg in EXPERIMENT_CONFIG['algorithms'] if alg not in beta_algorithms]
+
+        # Calculate total experiments for comprehensive reporting
+        main_experiments = (
+            len(EXPERIMENT_CONFIG['environments']) * (
+                len(beta_algorithms) * len(EXPERIMENT_CONFIG['seeds']) * len(beta_sweep)
+                + len(non_beta_algorithms) * len(EXPERIMENT_CONFIG['seeds'])
+            )
+        )
+
+        # Calculate ablation experiments
         key_ablations = ['beta_values']
         ablation_experiments = 0
         if ablation:
@@ -1184,42 +1201,61 @@ class ExperimentRunner:
                     ablation_experiments += len(EXPERIMENT_CONFIG['ablation_studies']['beta_values']) * len(EXPERIMENT_CONFIG['seeds'])
 
         total_experiments = main_experiments + ablation_experiments
-        
+
         # Enhanced publication mode header
         print(f"\n{'='*80}")
-        print(f"📚 PUBLICATION-QUALITY EXPERIMENT SUITE")
+        print(f"📚 PUBLICATION-QUALITY EXPERIMENT SUITE (Beta Sweep)")
         print(f"   Main Experiments: {main_experiments}")
         print(f"   Ablation Studies: {ablation_experiments}")
         print(f"   Total Experiments: {total_experiments}")
         print(f"   Environments: {len(EXPERIMENT_CONFIG['environments'])}")
         print(f"   Algorithms: {len(EXPERIMENT_CONFIG['algorithms'])}")
         print(f"   Seeds: {len(EXPERIMENT_CONFIG['seeds'])}")
+        print(f"   Beta values: {beta_sweep}")
         print(f"   Episodes per Experiment: {EXPERIMENT_CONFIG['max_episodes']}")
         print(f"   Max Timesteps: {EXPERIMENT_CONFIG['max_timesteps']}")
         print(f"   Execution Mode: {'Parallel' if parallel else 'Sequential'}")
         print(f"{'='*80}\n")
-        
+
         try:
             # Run main experiments with publication settings
-            print("🚀 Phase 1: Running Main Experiments")
-            results = self.run_all_experiments(parallel=parallel)
-            
+            print("🚀 Phase 1: Running Main Experiments (Beta Sweep)")
+            all_results = []
+            # Run beta sweep for beta algorithms
+            for alg in beta_algorithms:
+                for beta in beta_sweep:
+                    print(f"   > Algorithm: {alg}, Beta = {beta}")
+                    # Temporarily override algorithms list for this run
+                    orig_algs = EXPERIMENT_CONFIG['algorithms']
+                    EXPERIMENT_CONFIG['algorithms'] = [alg]
+                    results = self.run_all_experiments(parallel=parallel, beta_override=beta)
+                    all_results.extend(results if isinstance(results, list) else [results])
+                    EXPERIMENT_CONFIG['algorithms'] = orig_algs
+            # Run non-beta algorithms only once (no beta loop)
+            for alg in non_beta_algorithms:
+                print(f"   > Algorithm: {alg} (no beta sweep)")
+                orig_algs = EXPERIMENT_CONFIG['algorithms']
+                EXPERIMENT_CONFIG['algorithms'] = [alg]
+                results = self.run_all_experiments(parallel=parallel, beta_override=None)
+                all_results.extend(results if isinstance(results, list) else [results])
+                EXPERIMENT_CONFIG['algorithms'] = orig_algs
+
             # Run key ablations with publication settings
             if ablation:
                 print("\n🔬 Phase 2: Running Ablation Studies")
                 for ablation in key_ablations:
                     print(f"   Running {ablation} ablation...")
                     self.run_ablation_studies(ablation_type=ablation, parallel=parallel)
-            
+
             self.logger.info("Publication experiments completed!")
-            
+
         finally:
             # Restore original config
             EXPERIMENT_CONFIG['seeds'] = original_seeds
             EXPERIMENT_CONFIG['max_episodes'] = original_episodes
             EXPERIMENT_CONFIG['max_timesteps'] = original_timesteps
-        
-        return results
+
+        return all_results
     
     def analyze_results(self):
         """🔍 Comprehensive analysis of experimental results - Rich metadata only."""
