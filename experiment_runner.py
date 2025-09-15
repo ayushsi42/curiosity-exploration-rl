@@ -123,7 +123,7 @@ EXPERIMENT_CONFIG = {
     
     # SIMPLIFIED ABLATION STUDY CONFIGURATIONS
     # --- Meta network usage flag ---
-    'use_meta_network_for_beta': False,  # If True, use meta network for beta; else use scheduler
+    'use_meta_network_for_beta': True,  # If True, use meta network for beta; else use scheduler
     'ablation_studies': {
         # Memory ablations
         'memory_sizes': [200, 500, 1000],
@@ -335,6 +335,13 @@ class ExperimentRunner:
             meta_hidden_dim = 128
             meta_output_dim = 1
             meta_net = MetaAdaptation(meta_input_dim, meta_hidden_dim, meta_output_dim)
+            self.logger.info(f"[MetaNet] Using meta-network for beta in experiment: {exp_id}")
+            # Ensure no beta_override or scheduler is used
+            if ablation_config is not None and ('beta_initial' in ablation_config or 'beta_scheduler' in ablation_config):
+                self.logger.warning("[MetaNet] Ignoring beta_initial and beta_scheduler in ablation_config because meta-network is active.")
+                ablation_config = {k: v for k, v in ablation_config.items() if k not in ['beta_initial', 'beta_scheduler']}
+            if 'reward_system' in components:
+                components['reward_system'].beta = None
         
         # Training loop
         episode_rewards = []  # For plotting - will store EXTRINSIC rewards only
@@ -486,16 +493,21 @@ class ExperimentRunner:
             # --- MetaAdaptation: after episode, update beta using meta_net (if enabled) ---
             if meta_net is not None and len(meta_input_seq) > 0:
                 meta_seq_tensor = torch.stack(meta_input_seq).unsqueeze(0)  # (1, seq_len, input_dim)
-                with torch.no_grad():
-                    meta_beta_out, _ = meta_net(meta_seq_tensor)
-                    # meta_beta_out shape: [1, output_dim] (output_dim=1)
-                    meta_beta_value = float(torch.sigmoid(meta_beta_out[0, 0]).item())
+                # --- Meta-Network Forward & Training ---
+                meta_net.train()
+                meta_beta_out, _ = meta_net(meta_seq_tensor)
+                meta_beta_value = float(torch.sigmoid(meta_beta_out[0, 0]).item())
+                # self.logger.info(f"[MetaNet] meta_net called for episode {episode}, beta={meta_beta_value:.4f}")
                 meta_beta_history.append(meta_beta_value)
                 # Set beta in reward system directly
                 if components['reward_system']:
                     components['reward_system'].beta = meta_beta_value
-                    if hasattr(components['reward_system'], 'beta_scheduler'):
+                    if hasattr(components['reward_system'], 'beta_scheduler') and components['reward_system'].beta_scheduler is not None:
                         components['reward_system'].beta_scheduler.beta = meta_beta_value
+                # --- Meta-Loss: maximize extrinsic reward ---
+                meta_loss = -episode_extrinsic_reward  # maximize extrinsic reward
+                meta_loss = torch.tensor(meta_loss, dtype=torch.float32, requires_grad=True)
+                meta_net.update_meta(meta_loss)
             else:
                 meta_beta_history.append(None)
 
