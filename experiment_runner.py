@@ -93,7 +93,7 @@ EXPERIMENT_CONFIG = {
         'HopperBulletEnv-v0'
     ],
     'algorithms': [
-        'ppo_baseline',
+        # 'ppo_baseline',
         'mace_rl_full',
         # 'mace_rl_no_memory',
         # 'mace_rl_no_curiosity',
@@ -892,7 +892,7 @@ class ExperimentRunner:
                     beta_val = ablation_config[k]
                     break
         if beta_val is None:
-            beta_val = 0.6  # Default changed from 0.4 to 0.6
+            beta_val = 0.4  # Default changed from 0.4 to 0.6
         # For legacy code, keep beta_initial for most schedulers
         beta_initial = beta_val
         lr_actor = ablation_config.get('lr_actor', 0.0003) if ablation_config else 0.0003
