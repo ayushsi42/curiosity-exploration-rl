@@ -73,8 +73,8 @@ EXPERIMENT_CONFIG = {
     'environments': [
         # ✅ ACTIVE ENVIRONMENTS (4 total)
         # Basic gym environments (no additional dependencies required)
-        'CartPole-v1',                    # Simple control task
-        'Acrobot-v1',                     # More complex control task
+        # 'CartPole-v1',                    # Simple control task
+        # 'Acrobot-v1',                     # More complex control task
         # # MiniGrid environments (require: pip install gym-minigrid or minigrid)  
         # # 'HopperBulletEnv-v0',       # Navigation with key-door mechanics
         # # PyBullet environments (require: pip install pybullet)
@@ -123,7 +123,7 @@ EXPERIMENT_CONFIG = {
     
     # SIMPLIFIED ABLATION STUDY CONFIGURATIONS
     # --- Meta network usage flag ---
-    'use_meta_network_for_beta': True,  # If True, use meta network for beta; else use scheduler
+    'use_meta_network_for_beta': False,  # If True, use meta network for beta; else use scheduler
     'ablation_studies': {
         # Memory ablations
         'memory_sizes': [200, 500, 1000],

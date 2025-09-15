@@ -260,7 +260,11 @@ class PPO:
 
     def select_action(self, state):
         with torch.no_grad():
-            state = torch.FloatTensor(state).unsqueeze(0).to(self.device)
+            # Ensure state is a torch tensor and on the correct device
+            if not isinstance(state, torch.Tensor):
+                state = torch.FloatTensor(state)
+            state = state.unsqueeze(0) if state.ndim == 1 else state
+            state = state.to(self.device)
             action, action_logprob = self.policy_old.act(state)
 
         self.buffer.states.append(state.squeeze(0).cpu())  # Store on CPU to save GPU memory
