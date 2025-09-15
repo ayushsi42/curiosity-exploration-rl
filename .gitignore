@@ -3,3 +3,6 @@ logs
 *.pth
 test_*
 results/
+*-info
+.venv/
+uv.lock

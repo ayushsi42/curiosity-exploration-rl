@@ -78,7 +78,7 @@ EXPERIMENT_CONFIG = {
         # # MiniGrid environments (require: pip install gym-minigrid or minigrid)  
         # # 'HopperBulletEnv-v0',       # Navigation with key-door mechanics
         # # PyBullet environments (require: pip install pybullet)
-        'HalfCheetahBulletEnv-v0',       # Continuous control locomotion
+        # 'HalfCheetahBulletEnv-v0',       # Continuous control locomotion
         
         # # 🚫 DISABLED ENVIRONMENTS
         # # 'MountainCar-v0',               # Removed - replaced with more diverse set
@@ -93,10 +93,10 @@ EXPERIMENT_CONFIG = {
         'HopperBulletEnv-v0'
     ],
     'algorithms': [
-        'ppo_baseline',
+        # 'ppo_baseline',
         'mace_rl_full',
-        'mace_rl_no_memory',
-        'mace_rl_no_curiosity',
+        # 'mace_rl_no_memory',
+        # 'mace_rl_no_curiosity',
         'mace_rl_no_meta',
         # 'mace_rl_curiosity_only',
         # 'mace_rl_memory_only'
@@ -122,6 +122,8 @@ EXPERIMENT_CONFIG = {
     },
     
     # SIMPLIFIED ABLATION STUDY CONFIGURATIONS
+    # --- Meta network usage flag ---
+    'use_meta_network_for_beta': True,  # If True, use meta network for beta; else use scheduler
     'ablation_studies': {
         # Memory ablations
         'memory_sizes': [200, 500, 1000],
@@ -139,11 +141,10 @@ EXPERIMENT_CONFIG = {
     
     # 🎯 PUBLICATION MODE SETTINGS
     'publication_mode': {
-        'seeds': [42,56,78],  # Single seed for publication experiments too
+        'seeds': [42,678],  # Single seed for publication experiments too
         'max_episodes': 2000,
         'max_timesteps': 20000,
         'validation_episodes': 100
-        # Note: save_interval removed - only save final models
     }
 }
 
@@ -318,6 +319,19 @@ class ExperimentRunner:
         components = self._initialize_algorithm_components(
             algorithm, state_dim, action_dim, has_continuous_action_space, is_atari, ablation_config
         )
+
+        # --- MetaAdaptation integration (controlled by config flag) ---
+        meta_net = None
+        meta_beta_history = []
+        meta_beta = None
+        use_meta_net = EXPERIMENT_CONFIG.get('use_meta_network_for_beta', False)
+        if algorithm == 'mace_rl_full' and not is_atari and use_meta_net:
+            from mace_rl.modules.meta_adaptation import MetaAdaptation
+            # Example input_dim: state_dim + action_dim + 2 (reward, curiosity)
+            meta_input_dim = (state_dim if isinstance(state_dim, int) else state_dim[0]) + action_dim + 2
+            meta_hidden_dim = 128
+            meta_output_dim = 1
+            meta_net = MetaAdaptation(meta_input_dim, meta_hidden_dim, meta_output_dim)
         
         # Training loop
         episode_rewards = []  # For plotting - will store EXTRINSIC rewards only
@@ -378,6 +392,8 @@ class ExperimentRunner:
             episode_curiosity = 0
             step_count = 0
             
+            meta_beta_value = None
+            meta_input_seq = []
             for t in range(EXPERIMENT_CONFIG['env_specific_timesteps'].get(env_name, EXPERIMENT_CONFIG['max_timesteps'])):
                 step_count += 1
                 total_steps += 1  # Track total steps across episodes
@@ -390,7 +406,28 @@ class ExperimentRunner:
                 # Calculate total reward
                 total_reward = extrinsic_reward
                 curiosity_bonus = 0
-                
+                # --- MetaAdaptation: collect input for meta_net (if enabled) ---
+                if meta_net is not None:
+                    # Prepare meta input: [state, action(one-hot if discrete), extrinsic_reward, curiosity_bonus]
+                    if isinstance(state, tuple):
+                        state_tensor = torch.FloatTensor(state[0])
+                    else:
+                        state_tensor = torch.FloatTensor(state)
+                    state_tensor = state_tensor.view(-1)
+                    if has_continuous_action_space:
+                        action_tensor = torch.FloatTensor(action)
+                    else:
+                        # One-hot encode discrete action
+                        action_tensor = torch.zeros(action_dim)
+                        action_tensor[int(action)] = 1.0
+                    meta_input = torch.cat([
+                        state_tensor,
+                        action_tensor,
+                        torch.tensor([extrinsic_reward], dtype=torch.float32),
+                        torch.tensor([curiosity_bonus], dtype=torch.float32)
+                    ])
+                    meta_input_seq.append(meta_input)
+
                 if components['curiosity_module'] and components['reward_system']:
                     try:
                         # Prepare state and action tensors
@@ -399,15 +436,12 @@ class ExperimentRunner:
                         else:
                             state_tensor = torch.FloatTensor(state)
                         state_tensor = state_tensor.view(-1)
-                        
                         action_tensor = torch.FloatTensor(action) if has_continuous_action_space else torch.LongTensor([action])
-                        
                         # Get curiosity-adjusted reward
                         total_reward = components['reward_system'].get_total_reward(
                             state_tensor, action_tensor, extrinsic_reward
                         )
                         curiosity_bonus = total_reward - extrinsic_reward
-                        
                     except Exception as e:
                         self.logger.warning(f"Curiosity calculation failed: {e}")
                         total_reward = extrinsic_reward
@@ -446,15 +480,30 @@ class ExperimentRunner:
                 if done:
                     break
             
+            # --- MetaAdaptation: after episode, update beta using meta_net (if enabled) ---
+            if meta_net is not None and len(meta_input_seq) > 0:
+                meta_seq_tensor = torch.stack(meta_input_seq).unsqueeze(0)  # (1, seq_len, input_dim)
+                with torch.no_grad():
+                    meta_beta_out, _ = meta_net(meta_seq_tensor)
+                    # meta_beta_out shape: [1, output_dim] (output_dim=1)
+                    meta_beta_value = float(torch.sigmoid(meta_beta_out[0, 0]).item())
+                meta_beta_history.append(meta_beta_value)
+                # Set beta in reward system directly
+                if components['reward_system']:
+                    components['reward_system'].beta = meta_beta_value
+                    if hasattr(components['reward_system'], 'beta_scheduler'):
+                        components['reward_system'].beta_scheduler.beta = meta_beta_value
+            else:
+                meta_beta_history.append(None)
+
             # Update policy
             try:
                 loss_stats = components['agent'].update()
             except Exception as e:
                 self.logger.warning(f"Policy update failed: {e}")
-            
-            # Update beta scheduler for curiosity
-            if episode % 10 == 0 and components['reward_system']:
-                # Update with episode information for the scheduler
+
+            # Update beta scheduler for curiosity (if not using meta_net)
+            if (meta_net is None or not use_meta_net) and episode % 10 == 0 and components['reward_system']:
                 components['reward_system'].update_beta(episode=episode, step=total_steps)
             
             # Store episode data
@@ -491,6 +540,7 @@ class ExperimentRunner:
             'episode_training_rewards': episode_training_rewards,  # Total rewards for training metrics
             'episode_steps': episode_steps,
             'curiosity_rewards': curiosity_rewards,
+            'meta_beta_history': meta_beta_history if meta_net is not None else None,
             'final_reward': episode_rewards[-1] if episode_rewards else 0,  # Use extrinsic for final
             'mean_reward': np.mean(episode_rewards) if episode_rewards else 0,  # Use extrinsic for mean
             'std_reward': np.std(episode_rewards) if episode_rewards else 0,   # Use extrinsic for std
@@ -555,6 +605,7 @@ class ExperimentRunner:
                 'episode_training_rewards': episode_training_rewards,
                 'episode_steps': episode_steps,
                 'curiosity_rewards': curiosity_rewards,
+                'meta_beta_history': meta_beta_history if meta_net is not None else None,
                 'final_reward': result_data['final_reward'],
                 'mean_reward': result_data['mean_reward'],
                 'std_reward': result_data['std_reward'],
@@ -841,7 +892,7 @@ class ExperimentRunner:
                     beta_val = ablation_config[k]
                     break
         if beta_val is None:
-            beta_val = 0.4  # Default
+            beta_val = 0.6  # Default changed from 0.4 to 0.6
         # For legacy code, keep beta_initial for most schedulers
         beta_initial = beta_val
         lr_actor = ablation_config.get('lr_actor', 0.0003) if ablation_config else 0.0003
