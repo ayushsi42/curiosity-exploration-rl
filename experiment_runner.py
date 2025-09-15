@@ -93,8 +93,8 @@ EXPERIMENT_CONFIG = {
         'HopperBulletEnv-v0'
     ],
     'algorithms': [
-        'ppo_baseline',
-        # 'mace_rl_full',
+        # 'ppo_baseline',
+        'mace_rl_full',
         # 'mace_rl_no_memory',
         # 'mace_rl_no_curiosity',
         # 'mace_rl_no_meta',
@@ -1219,26 +1219,36 @@ class ExperimentRunner:
 
         try:
             # Run main experiments with publication settings
-            print("🚀 Phase 1: Running Main Experiments (Beta Sweep)")
+            use_meta_net = EXPERIMENT_CONFIG.get('use_meta_network_for_beta', False)
+            print("🚀 Phase 1: Running Main Experiments" + (" (Beta Sweep)" if not use_meta_net else " (Meta-Network Beta)"))
             all_results = []
-            # Run beta sweep for beta algorithms
-            for alg in beta_algorithms:
-                for beta in beta_sweep:
-                    print(f"   > Algorithm: {alg}, Beta = {beta}")
-                    # Temporarily override algorithms list for this run
+            if use_meta_net:
+                # Run each algorithm only once, no beta sweep
+                for alg in EXPERIMENT_CONFIG['algorithms']:
+                    print(f"   > Algorithm: {alg} (meta-network beta, no sweep)")
                     orig_algs = EXPERIMENT_CONFIG['algorithms']
                     EXPERIMENT_CONFIG['algorithms'] = [alg]
-                    results = self.run_all_experiments(parallel=parallel, beta_override=beta)
+                    results = self.run_all_experiments(parallel=parallel, beta_override=None)
                     all_results.extend(results if isinstance(results, list) else [results])
                     EXPERIMENT_CONFIG['algorithms'] = orig_algs
-            # Run non-beta algorithms only once (no beta loop)
-            for alg in non_beta_algorithms:
-                print(f"   > Algorithm: {alg} (no beta sweep)")
-                orig_algs = EXPERIMENT_CONFIG['algorithms']
-                EXPERIMENT_CONFIG['algorithms'] = [alg]
-                results = self.run_all_experiments(parallel=parallel, beta_override=None)
-                all_results.extend(results if isinstance(results, list) else [results])
-                EXPERIMENT_CONFIG['algorithms'] = orig_algs
+            else:
+                # Run beta sweep for beta algorithms
+                for alg in beta_algorithms:
+                    for beta in beta_sweep:
+                        print(f"   > Algorithm: {alg}, Beta = {beta}")
+                        orig_algs = EXPERIMENT_CONFIG['algorithms']
+                        EXPERIMENT_CONFIG['algorithms'] = [alg]
+                        results = self.run_all_experiments(parallel=parallel, beta_override=beta)
+                        all_results.extend(results if isinstance(results, list) else [results])
+                        EXPERIMENT_CONFIG['algorithms'] = orig_algs
+                # Run non-beta algorithms only once (no beta loop)
+                for alg in non_beta_algorithms:
+                    print(f"   > Algorithm: {alg} (no beta sweep)")
+                    orig_algs = EXPERIMENT_CONFIG['algorithms']
+                    EXPERIMENT_CONFIG['algorithms'] = [alg]
+                    results = self.run_all_experiments(parallel=parallel, beta_override=None)
+                    all_results.extend(results if isinstance(results, list) else [results])
+                    EXPERIMENT_CONFIG['algorithms'] = orig_algs
 
             # Run key ablations with publication settings
             if ablation:
