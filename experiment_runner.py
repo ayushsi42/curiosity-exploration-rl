@@ -78,7 +78,7 @@ EXPERIMENT_CONFIG = {
         # # MiniGrid environments (require: pip install gym-minigrid or minigrid)  
         # # 'HopperBulletEnv-v0',       # Navigation with key-door mechanics
         # # PyBullet environments (require: pip install pybullet)
-        # 'HalfCheetahBulletEnv-v0',       # Continuous control locomotion
+        'HalfCheetahBulletEnv-v0',       # Continuous control locomotion
         
         # # 🚫 DISABLED ENVIRONMENTS
         # # 'MountainCar-v0',               # Removed - replaced with more diverse set
@@ -93,15 +93,15 @@ EXPERIMENT_CONFIG = {
         'HopperBulletEnv-v0'
     ],
     'algorithms': [
-        # 'ppo_baseline',
+        'ppo_baseline',
         'mace_rl_full',
         # 'mace_rl_no_memory',
         # 'mace_rl_no_curiosity',
-        'mace_rl_no_meta',
+        # 'mace_rl_no_meta',
         # 'mace_rl_curiosity_only',
         # 'mace_rl_memory_only'
     ],
-    'seeds': [42,678],  # Single seed for all experiments
+    'seeds': [42],  # Single seed for all experiments
     'max_episodes': 2000,
     'max_timesteps': 10000,
     # Note: save_interval removed - only save final models
@@ -141,7 +141,7 @@ EXPERIMENT_CONFIG = {
     
     # 🎯 PUBLICATION MODE SETTINGS
     'publication_mode': {
-        'seeds': [42,678],  # Single seed for publication experiments too
+        'seeds': [42],  # Single seed for publication experiments too
         'max_episodes': 2000,
         'max_timesteps': 20000,
         'validation_episodes': 100
