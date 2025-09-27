@@ -4,21 +4,16 @@ Effective exploration remains a fundamental challenge in Reinforcement Learning 
 
 ## Results
 
-\begin{table*}[!t]
-\centering
-\label{tab:main_results}
-\begin{tabular}{l|ccc}
-\toprule
-\textbf{Algorithm} & \textbf{Acrobot-v1} & \textbf{CartPole-v1} & \textbf{HopperBulletEnv-v0} \\
-\midrule
-PPO (Baseline) & 186 / 617 & 140 / 660 & 865 / 1841 \\
-\midrule
-MACE-RL (Fixed $\beta$, $\beta=0.4$, Exponential Scheduler) & 201 / 595 & 120 / \textbf{620} & 782 / 1801 \\
-\midrule
-MACE-RL (Full, Meta Network) & \textbf{249 / 586} & \textbf{104} / 634 & \textbf{495 / 1799} \\
-\bottomrule
-\end{tabular}
-\caption{Metrics reported are Sample Efficiency and Convergence Steps across three environments Acrobot-v1, CartPole-v1, HopperBulletEnv-v0. Lower is better for both metrics. Best results are in \textbf{bold}.}
-\end{table*}
+### Main Results
+
+Metrics reported are **Sample Efficiency / Convergence Steps** across three environments.  
+Lower is better for both metrics. Best results are in **bold**.
+
+| Algorithm                                                   | Acrobot-v1     | CartPole-v1     | HopperBulletEnv-v0 |
+|-------------------------------------------------------------|----------------|-----------------|---------------------|
+| **PPO (Baseline)**                                          | 186 / 617      | 140 / 660       | 865 / 1841          |
+| **MACE-RL (Fixed β, β=0.4, Exponential Scheduler)**         | 201 / 595      | 120 / **620**   | 782 / 1801          |
+| **MACE-RL (Full, Meta Network)**                            | **249 / 586**  | **104 / 634**   | **495 / 1799**      |
+
 
 Our code is available at \url{https://github.com/ayushsi42/mace_rl}
